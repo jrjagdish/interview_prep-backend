@@ -1,18 +1,9 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import HTTPException
 import pdfplumber
 import re
-from fastapi.middleware.cors import CORSMiddleware
-import os
+from io import BytesIO
+import requests
 
-app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # For now, allow all origins
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 def extract_fields(text: str):
     # Your existing function...
@@ -31,14 +22,40 @@ def extract_fields(text: str):
         "phone": phone.group(0) if phone else "❌ Missing",
     }
 
-@app.post("/parse_resume/")
-async def parse_resume(file: UploadFile = File(...)):
-    if not file.filename.endswith(".pdf"):
+
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
+
+
+def download_pdf_from_url(url: str) -> BytesIO:
+    response = requests.get(
+        url,
+        stream=True,
+        timeout=10,
+    )
+    response.raise_for_status()
+    content = BytesIO()
+    total_size = 0
+    for chunk in response.iter_content(chunk_size=8192):
+        total_size += len(chunk)
+        if total_size > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=400, detail="File size exceeds the 5 MB limit."
+            )
+        content.write(chunk)
+    content.seek(0)
+    return content
+
+
+async def parse_resume(pdf_url: str):
+
+    if not pdf_url.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
     try:
-        with pdfplumber.open(file.file) as pdf:
-            text = ""
+        file = download_pdf_from_url(pdf_url)
+        text = ""
+        with pdfplumber.open(file) as pdf:
+
             for page in pdf.pages:
                 text += page.extract_text() or ""
 
@@ -47,21 +64,11 @@ async def parse_resume(file: UploadFile = File(...)):
 
         result = extract_fields(text)
 
-        missing_fields = []
-        if result["name"] == "❌ Missing":
-            missing_fields.append("name")
-        if result["email"] == "❌ Missing":
-            missing_fields.append("email")
-        if result["phone"] == "❌ Missing":
-            missing_fields.append("phone")
+        missing_fields = [
+            field for field, value in result.items() if value == "❌ Missing"
+        ]
 
         return {"success": True, "extracted": result, "missing_fields": missing_fields}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error parsing PDF: {str(e)}")
-
-# Add this for Render compatibility
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=port)
