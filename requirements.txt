@@ -40,3 +40,4 @@ httpx>=0.27
 orjson>=3.10
 pdfplumber
 python-multipart==0.0.6
+cloudinary == 1.44.1

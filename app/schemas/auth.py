@@ -7,4 +7,6 @@ class UserCreate(BaseModel):
     full_name: Optional[str] = None
     role: Optional[str] = "user"
 
-    
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
