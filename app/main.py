@@ -1,0 +1,21 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.routes import auth, adminroutes, guest,interviewroute
+
+app = FastAPI(title="Interview Preparation App")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.include_router(auth.router)
+app.include_router(adminroutes.router)
+app.include_router(guest.router)
+
+app.include_router(interviewroute.router)
+@app.get("/")
+def read_root():
+    return {"message": "Welcome to the Interview Preparation App!"}
+

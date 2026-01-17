@@ -1,9 +1,7 @@
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
+from app.core.config import settings
 
-SECRET_KEY = "your_secret_key"  
-ALGORITHM = "HS256" 
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
@@ -12,12 +10,29 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     else:
         expire = datetime.utcnow() + timedelta(minutes=15)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
 def verify_access_token(token: str):
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         return payload
     except JWTError:
         return None
+
+from app.core.config import settings
+
+def create_guest_token(guest_id: str, session_id: int) -> str:
+    payload = {
+        "type": "guest",
+        "guest_id": guest_id,
+        "session_id": session_id,
+        "exp": datetime.utcnow() + timedelta(minutes=30),
+    }
+
+    return jwt.encode(
+        payload,
+        settings.SECRET_KEY,
+        algorithm=settings.ALGORITHM,
+    )
+

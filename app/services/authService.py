@@ -1,4 +1,5 @@
 from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError,jwt
 from app.models.users import User
 from app.db.session import get_db
 from sqlalchemy.orm import Session
@@ -6,7 +7,11 @@ from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException, status, Depends
 from app.utils.security import create_access_token,verify_access_token
 from app.schemas.auth import UserCreate
+from app.core.config import settings
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+oauth2_guest = OAuth2PasswordBearer(tokenUrl="/guest/token")
 
 
 def register_user(user:UserCreate,db:Session=Depends(get_db)):
@@ -67,3 +72,22 @@ def get_current_user(token:str = Depends(oauth2_scheme),db:Session=Depends(get_d
             detail="User not found"
         )
     return user
+
+def get_current_guest(token: str = Depends(oauth2_guest)):
+    try:
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM],
+        )
+
+        if payload.get("type") != "guest":
+            raise HTTPException(401, "Invalid token type")
+
+        return {
+            "guest_id": payload["guest_id"],
+            "session_id": payload["session_id"],
+        }
+
+    except JWTError:
+        raise HTTPException(401, "Invalid or expired guest token")

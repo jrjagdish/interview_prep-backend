@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Text, ForeignKey
+from sqlalchemy import Column, Integer, Text, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.db.base import Base
 
@@ -14,3 +14,6 @@ class InterviewQuestion(Base):
 
     session = relationship("InterviewSession", back_populates="questions")
     answers = relationship("InterviewAnswer", back_populates="question")
+    __table_args__ = (
+        UniqueConstraint("session_id", "question_index"),
+    )

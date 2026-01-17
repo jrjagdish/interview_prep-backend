@@ -1,85 +1,130 @@
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 from app.models.interviewevaluation import InterviewEvaluation
-from app.models.interviewanswer import InterviewAnswer  
+from app.models.interviewanswer import InterviewAnswer
 from app.models.interviewquestion import InterviewQuestion
 from app.models.interviewsession import InterviewSession
 from app.ai.interviewagent import InterviewAgent
 from app.core.config import settings
+from uuid import UUID
+
 
 class InterviewService:
-    def __init__(self,db: Session):
+    def __init__(self, db: Session):
         self.db = db
         self.agent = InterviewAgent(groq_api_key=settings.GROQ_API_KEY)
-    
-    def start_interview_session(self,
+
+    def start_interview_session(
+        self,
         role: str,
         level: str,
-        guest_id: int | None = None,
-        user_id: int | None = None):
-        questions = self.agent.generate_questions(count=6, role=role, level=level)
+        guest_id: UUID | None = None,
+        user_id: UUID | None = None,
+    ):
+        existing = (
+            self.db.query(InterviewSession)
+            .filter(
+                InterviewSession.guest_user_id == guest_id,
+                InterviewSession.status != "COMPLETED",
+            )
+            .first()
+        )
+
+        if existing:
+            raise HTTPException(
+                400,
+                "Guest already has an active interview",
+            )
+
+        questions_obj = self.agent.generate_questions(count=6, role=role, level=level)
+        questions = questions_obj.questions
         session = InterviewSession(
-            user_id=user_id,
-            guest_user_id=guest_id,
-            total_questions=len(questions)
+            user_id=user_id, guest_user_id=guest_id, total_questions=len(questions)
         )
         self.db.add(session)
         self.db.flush()  # To get session.id
         for index, question_text in enumerate(questions):
             question = InterviewQuestion(
-                session_id=session.id,
-                question_index=index,
-                question_text=question_text
+                session_id=session.id, question_index=index, question_text=question_text
             )
             self.db.add(question)
 
         self.db.commit()
         return session.id, questions[0]
-    
 
     # ---------------- INTERVIEW FLOW ---------------- #
 
-    
-    def get_current_question(self, session_id : int):
+    def get_current_question(self, session_id: int):
         session = self._get_active_session(session_id)
         question = (
             self.db.query(InterviewQuestion)
             .filter_by(
-                session_id=session.id,
-                question_index=session.current_question_index
+                session_id=session.id, question_index=session.current_question_index
             )
             .first()
         )
 
         return session.current_question_index, question.question_text
-    
-    def submit_answer(self, session_id: int, answer: str):
-        session = self._get_active_session(session_id)
 
+    def submit_answer(self, session_id: int, answer: str) -> bool:
+        with self.db.begin():  # transaction boundary
+
+            # Lock session row
+            session = (
+                self.db.query(InterviewSession)
+                .filter(
+                    InterviewSession.id == session_id,
+                    InterviewSession.status == "IN_PROGRESS",
+                )
+                .with_for_update()
+                .first()
+            )
+
+        if not session:
+            raise HTTPException(404, "Session not active")
+
+        # Fetch current question
         question = (
             self.db.query(InterviewQuestion)
             .filter_by(
                 session_id=session.id,
-                question_index=session.current_question_index
+                question_index=session.current_question_index,
             )
             .first()
         )
 
+        if not question:
+            raise HTTPException(400, "Invalid question index")
+
+        # Prevent duplicate answer
+        existing = (
+            self.db.query(InterviewAnswer)
+            .filter_by(
+                session_id=session.id,
+                question_id=session.current_question_index,
+            )
+            .first()
+        )
+
+        if existing:
+            raise HTTPException(409, "Answer already submitted")
+
+        # Save answer
         self.db.add(
             InterviewAnswer(
                 session_id=session.id,
-                question_id=question.id,
-                answer_text=answer
+                question_id=session.current_question_index,
+                answer_text=answer,
             )
         )
 
+        # Move to next question
         session.current_question_index += 1
 
-        if session.current_question_index == session.total_questions:
+        if session.current_question_index >= session.total_questions:
             session.status = "COMPLETED"
 
-        self.db.commit()
-
+        # commit happens automatically here
         return session.status == "COMPLETED"
 
     # ---------------- EVALUATE ---------------- #
@@ -99,8 +144,7 @@ class InterviewService:
         )
 
         qa_data = [
-            {"question": q.question_text, "answer": a.answer_text}
-            for q, a in qa
+            {"question": q.question_text, "answer": a.answer_text} for q, a in qa
         ]
 
         result = self.agent.evaluate_answers(qa_data)
@@ -108,7 +152,7 @@ class InterviewService:
         evaluation = InterviewEvaluation(
             session_id=session.id,
             total_score=result.total_score,
-            feedback=result.overall_feedback
+            feedback=result.overall_feedback,
         )
 
         self.db.add(evaluation)

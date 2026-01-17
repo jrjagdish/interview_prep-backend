@@ -11,10 +11,11 @@ class InterviewEvaluation(Base):
     session_id = Column(
         Integer,
         ForeignKey("interview_sessions.id"),
-        unique=True
+        unique=True,
+        nullable=False
     )
 
-    total_score = Column(Float)  # e.g. 7.5 / 10
+    total_score = Column(Float, nullable=False)  # e.g. 7.5 / 10
     feedback = Column(Text)      # AI analysis of thinking
 
     created_at = Column(DateTime, default=datetime.utcnow)

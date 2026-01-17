@@ -1,6 +1,7 @@
-from sqlalchemy import Integer, String, Boolean, Column
+from sqlalchemy import DateTime, Integer, String, Boolean, Column
 from app.db.base import Base
 import uuid
+from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
 from passlib.context import CryptContext
 from datetime import datetime
@@ -19,6 +20,11 @@ class User(Base):
     role = Column(String, default="user")
     is_active = Column(Boolean, default=True)
     joined_at = Column(default=datetime.utcnow)
+    interview_sessions = relationship(
+        "InterviewSession",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
     def hash_password(self, password: str):
         self.hashed_password = pwd_context.hash(password)
@@ -33,7 +39,12 @@ class GuestUser(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     pdf_url = Column(String, nullable=False)
-    joined_at = Column(default=datetime.utcnow)
+    joined_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    interview_sessions = relationship(
+        "InterviewSession",
+        back_populates="guest_user",
+        cascade="all, delete-orphan",
+    )
 
     def __str__(self):
         return f"GuestUser(username={self.username}, email={self.email})"

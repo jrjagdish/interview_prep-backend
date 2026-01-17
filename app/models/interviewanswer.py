@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Text, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, Text, ForeignKey, DateTime, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.db.base import Base
@@ -17,3 +17,6 @@ class InterviewAnswer(Base):
 
     session = relationship("InterviewSession", back_populates="answers")
     question = relationship("InterviewQuestion", back_populates="answers")
+    __table_args__ = (
+        UniqueConstraint("session_id", "question_id"),
+    )
