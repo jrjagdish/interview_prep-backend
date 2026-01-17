@@ -1,5 +1,5 @@
 from sqlalchemy import Integer, String, Boolean, Column
-from sqlalchemy.ext.declarative import declarative_base
+from app.db.base import Base
 import uuid
 from sqlalchemy.dialects.postgresql import UUID
 from passlib.context import CryptContext
@@ -7,7 +7,7 @@ from datetime import datetime
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-Base = declarative_base()
+
 
 
 class User(Base):
