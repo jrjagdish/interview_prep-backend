@@ -14,4 +14,3 @@ class Settings(BaseSettings):
         env_file = ".env"
 
 settings = Settings()
-print("🔥 DATABASE_URL USED:", settings.DATABASE_URL)

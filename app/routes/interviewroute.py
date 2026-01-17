@@ -1,30 +1,33 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.schemas.interview import AnswerRequest, StartInterviewRequest
-from app.services.authService import get_current_user
+from app.services.authService import get_current_user,get_current_guest
 from app.services.interviewservice import InterviewService
 from app.db.session import get_db
+
 router = APIRouter(prefix="/interview", tags=["Interview"])
+
 
 @router.post("/start")
 def start_interview(
     payload: StartInterviewRequest,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user=Depends(get_current_user),
+    guest_user = Depends(get_current_guest)
 ):
     service = InterviewService(db)
 
-    session_id, first_question = service.start_interview_session(
+    result = service.start_interview_session(
         role=payload.role,
         level=payload.level,
-        guest_id=payload.guest_id,
+        guest_id=guest_user.id,
         user_id=current_user.id,
     )
 
     return {
-        "session_id": session_id,
-        "question_index": 0,
-        "question": first_question,
+        "session_id": result["session_id"],
+        "question_index": result["question_index"],
+        "question": result["question"],
     }
 
 
@@ -64,5 +67,3 @@ def evaluate_interview(
 ):
     service = InterviewService(db)
     return service.evaluate_interview(session_id)
-
-

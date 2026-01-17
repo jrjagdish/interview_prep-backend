@@ -19,7 +19,7 @@ class User(Base):
     hashed_password = Column(String, nullable=True)
     role = Column(String, default="user")
     is_active = Column(Boolean, default=True)
-    joined_at = Column(default=datetime.utcnow)
+    joined_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     interview_sessions = relationship(
         "InterviewSession",
         back_populates="user",
@@ -39,6 +39,7 @@ class GuestUser(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     pdf_url = Column(String, nullable=False)
+    cloudinary_public_id = Column(String, nullable=True)
     joined_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     interview_sessions = relationship(
         "InterviewSession",

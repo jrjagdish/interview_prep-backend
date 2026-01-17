@@ -1,8 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.db.init import init_db
 from app.routes import auth, adminroutes, guest,interviewroute
 
+
+
 app = FastAPI(title="Interview Preparation App")
+@app.on_event("startup")
+def on_startup():
+    init_db()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

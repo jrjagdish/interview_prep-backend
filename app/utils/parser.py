@@ -3,6 +3,7 @@ import pdfplumber
 import re
 from io import BytesIO
 import requests
+import cloudinary.utils
 
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
 
@@ -26,6 +27,9 @@ def extract_fields(text: str) -> dict:
 
 def download_pdf_from_url(url: str) -> BytesIO:
     response = requests.get(url, stream=True, timeout=10)
+    if response.status_code == 401:
+        # Logic to sign the URL could go here if the file is 'private'
+        raise HTTPException(status_code=401, detail="Access Denied by Cloudinary. Check if file is Private.")
     response.raise_for_status()
 
     content = BytesIO()
@@ -83,5 +87,6 @@ def parse_resume(pdf_url: str) -> dict:
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail="Resume parsing failed",
+            detail=f"Resume parsing failed : {e}",
+            
         )

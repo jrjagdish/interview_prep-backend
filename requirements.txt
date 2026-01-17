@@ -20,8 +20,10 @@ pydantic[email]>=2.6
 # -----------------------------
 # Authentication & Security
 # -----------------------------
-passlib[bcrypt]>=1.7                 # Password hashing
-python-jose[cryptography]>=3.3       # JWT token creation/verification
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+python-jose[cryptography]==3.3.0
+       # JWT token creation/verification
 
 # -----------------------------
 # LangChain + Groq

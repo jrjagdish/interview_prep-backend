@@ -21,36 +21,64 @@ class InterviewService:
         guest_id: UUID | None = None,
         user_id: UUID | None = None,
     ):
-        existing = (
-            self.db.query(InterviewSession)
-            .filter(
-                InterviewSession.guest_user_id == guest_id,
-                InterviewSession.status != "COMPLETED",
+        if guest_id and user_id:
+            raise HTTPException(400, "Invalid identity")
+
+        # ---------------- USER FLOW ----------------
+        if user_id:
+            existing = (
+                self.db.query(InterviewSession)
+                .filter(
+                    InterviewSession.user_id == user_id,
+                    InterviewSession.status == "IN_PROGRESS",
+                )
+                .first()
             )
-            .first()
-        )
+
+        # ---------------- GUEST FLOW ----------------
+        else:
+            existing = (
+                self.db.query(InterviewSession)
+                .filter(
+                    InterviewSession.guest_user_id == guest_id,
+                    InterviewSession.status == "IN_PROGRESS",
+                )
+                .first()
+            )
 
         if existing:
-            raise HTTPException(
-                400,
-                "Guest already has an active interview",
-            )
+            raise HTTPException(400, "Active interview already exists")
 
-        questions_obj = self.agent.generate_questions(count=6, role=role, level=level)
-        questions = questions_obj.questions
+        # Generate questions
+        questions = self.agent.generate_questions(count=6, role=role, level=level)
+
         session = InterviewSession(
-            user_id=user_id, guest_user_id=guest_id, total_questions=len(questions)
+            user_id=user_id,
+            guest_user_id=guest_id,
+            total_questions=len(questions),
+            current_question_index=0,
+            status="IN_PROGRESS",
         )
+
         self.db.add(session)
-        self.db.flush()  # To get session.id
+        self.db.flush()
+
         for index, question_text in enumerate(questions):
-            question = InterviewQuestion(
-                session_id=session.id, question_index=index, question_text=question_text
+            self.db.add(
+                InterviewQuestion(
+                    session_id=session.id,
+                    question_index=index,
+                    question_text=question_text,
+                )
             )
-            self.db.add(question)
 
         self.db.commit()
-        return session.id, questions[0]
+
+        return {
+            "session_id": session.id,
+            "question_index": 0,
+            "question": questions[0],
+        }
 
     # ---------------- INTERVIEW FLOW ---------------- #
 

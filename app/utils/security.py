@@ -10,23 +10,29 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     else:
         expire = datetime.utcnow() + timedelta(minutes=15)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    encoded_jwt = jwt.encode(
+        to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM
+    )
     return encoded_jwt
+
 
 def verify_access_token(token: str):
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+        )
         return payload
     except JWTError:
         return None
 
+
 from app.core.config import settings
 
-def create_guest_token(guest_id: str, session_id: int) -> str:
+
+def create_guest_token(guest_id: str) -> str:
     payload = {
         "type": "guest",
         "guest_id": guest_id,
-        "session_id": session_id,
         "exp": datetime.utcnow() + timedelta(minutes=30),
     }
 
@@ -35,4 +41,3 @@ def create_guest_token(guest_id: str, session_id: int) -> str:
         settings.SECRET_KEY,
         algorithm=settings.ALGORITHM,
     )
-

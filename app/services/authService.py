@@ -1,4 +1,4 @@
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError,jwt
 from app.models.users import User
 from app.db.session import get_db
@@ -9,9 +9,9 @@ from app.utils.security import create_access_token,verify_access_token
 from app.schemas.auth import UserCreate
 from app.core.config import settings
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+bearer_scheme = HTTPBearer(auto_error=True)
 
-oauth2_guest = OAuth2PasswordBearer(tokenUrl="/guest/token")
+bearer_guest = HTTPBearer(auto_error=True)
 
 
 def register_user(user:UserCreate,db:Session=Depends(get_db)):
@@ -52,7 +52,8 @@ def login_user(email:str,password:str,db:Session=Depends(get_db)):
     access_token = create_access_token(data={"sub": user.email})
     return {"access_token": access_token, "token_type": "bearer"}
 
-def get_current_user(token:str = Depends(oauth2_scheme),db:Session=Depends(get_db)):
+def get_current_user(credentials:HTTPAuthorizationCredentials = Depends(bearer_scheme),db:Session=Depends(get_db)):
+    token = credentials.credentials
     payload=verify_access_token(token)
     if payload is None:
         raise HTTPException(
@@ -73,7 +74,8 @@ def get_current_user(token:str = Depends(oauth2_scheme),db:Session=Depends(get_d
         )
     return user
 
-def get_current_guest(token: str = Depends(oauth2_guest)):
+def get_current_guest(credentials: HTTPAuthorizationCredentials = Depends(bearer_guest)):
+    token = credentials.credentials
     try:
         payload = jwt.decode(
             token,
