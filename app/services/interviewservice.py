@@ -84,20 +84,24 @@ class InterviewService:
 
     def get_current_question(self, session_id: int):
         session = self._get_active_session(session_id)
+
+        if session.current_question_index >= session.total_questions:
+            raise HTTPException(400, "Interview completed")
+
         question = (
             self.db.query(InterviewQuestion)
             .filter_by(
-                session_id=session.id, question_index=session.current_question_index
+                session_id=session.id,
+                question_index=session.current_question_index,
             )
             .first()
         )
 
         return session.current_question_index, question.question_text
 
-    def submit_answer(self, session_id: int, answer: str) -> bool:
-        with self.db.begin():  # transaction boundary
+    def submit_answer(self, session_id: int, answer: str):
+        with self.db.begin():
 
-            # Lock session row
             session = (
                 self.db.query(InterviewSession)
                 .filter(
@@ -108,52 +112,71 @@ class InterviewService:
                 .first()
             )
 
-        if not session:
-            raise HTTPException(404, "Session not active")
+            if not session:
+                raise HTTPException(404, "Session not active")
 
-        # Fetch current question
-        question = (
-            self.db.query(InterviewQuestion)
-            .filter_by(
-                session_id=session.id,
-                question_index=session.current_question_index,
+            # Get current question
+            question = (
+                self.db.query(InterviewQuestion)
+                .filter_by(
+                    session_id=session.id,
+                    question_index=session.current_question_index,
+                )
+                .first()
             )
-            .first()
-        )
 
-        if not question:
-            raise HTTPException(400, "Invalid question index")
+            if not question:
+                raise HTTPException(400, "Invalid question index")
 
-        # Prevent duplicate answer
-        existing = (
-            self.db.query(InterviewAnswer)
-            .filter_by(
-                session_id=session.id,
-                question_id=session.current_question_index,
+            # Prevent duplicate answer
+            existing = (
+                self.db.query(InterviewAnswer)
+                .filter_by(
+                    session_id=session.id,
+                    question_id=question.id,
+                )
+                .first()
             )
-            .first()
-        )
 
-        if existing:
-            raise HTTPException(409, "Answer already submitted")
+            if existing:
+                raise HTTPException(409, "Answer already submitted")
 
-        # Save answer
-        self.db.add(
-            InterviewAnswer(
-                session_id=session.id,
-                question_id=session.current_question_index,
-                answer_text=answer,
+            # Save answer
+            self.db.add(
+                InterviewAnswer(
+                    session_id=session.id,
+                    question_id=question.id,
+                    answer_text=answer,
+                )
             )
-        )
 
-        # Move to next question
-        session.current_question_index += 1
+            # Move to next question
+            session.current_question_index += 1
 
-        if session.current_question_index >= session.total_questions:
-            session.status = "COMPLETED"
+            # If completed
+            if session.current_question_index >= session.total_questions:
+                session.status = "COMPLETED"
+                return {
+                    "completed": True,
+                    "message": "Interview completed. Ready for evaluation.",
+                }
 
-        # commit happens automatically here
-        return session.status == "COMPLETED"
+            # Fetch next question
+            next_question = (
+                self.db.query(InterviewQuestion)
+                .filter_by(
+                    session_id=session.id,
+                    question_index=session.current_question_index,
+                )
+                .first()
+            )
+
+            return {
+                "completed": False,
+                "question_index": session.current_question_index,
+                "question": next_question.question_text,
+            }
+
 
     # ---------------- EVALUATE ---------------- #
 
@@ -162,10 +185,26 @@ class InterviewService:
 
         if not session or session.status != "COMPLETED":
             raise HTTPException(400, "Interview not completed")
+        existing = (
+            self.db.query(InterviewEvaluation)
+            .filter(InterviewEvaluation.session_id == session.id)
+            .first()
+        )
+
+        if existing:
+            return {
+                "session_id": existing.session_id,
+                "total_score": existing.total_score,
+                "feedback": existing.feedback,
+                "already_evaluated": True,
+            }
 
         qa = (
             self.db.query(InterviewQuestion, InterviewAnswer)
-            .join(InterviewAnswer)
+            .join(
+                InterviewAnswer,
+                InterviewAnswer.question_id == InterviewQuestion.id,
+            )
             .filter(InterviewQuestion.session_id == session.id)
             .order_by(InterviewQuestion.question_index)
             .all()

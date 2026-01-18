@@ -5,6 +5,7 @@ from app.core.config import settings
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
+    to_encode["type"] = "user"
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:

@@ -21,6 +21,7 @@ def register_user(user:UserCreate,db:Session=Depends(get_db)):
         raise ValueError("User with this email already exists.")
     db_user=User(
         email=user.email,
+        role = user.role,
     )
     db_user.hash_password(user.password)
     try:
@@ -49,7 +50,7 @@ def login_user(email:str,password:str,db:Session=Depends(get_db)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect password"
         )
-    access_token = create_access_token(data={"sub": user.email})
+    access_token = create_access_token(data={"sub": user.email , "role": user.role})
     return {"access_token": access_token, "token_type": "bearer"}
 
 def get_current_user(credentials:HTTPAuthorizationCredentials = Depends(bearer_scheme),db:Session=Depends(get_db)):
@@ -61,7 +62,7 @@ def get_current_user(credentials:HTTPAuthorizationCredentials = Depends(bearer_s
             detail="Invalid token"
         )
     email: str = payload.get("sub")
-    if email is None:
+    if email is None or payload.get("type") != "user":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token payload"

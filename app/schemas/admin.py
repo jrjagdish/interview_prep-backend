@@ -12,12 +12,10 @@ class GuestCandidateOut(BaseModel):
 
 # app/schemas/admin.py
 class AdminSessionScoreOut(BaseModel):
-    session_id: int
-    guest_username: str
-    guest_email: str
-    total_score: int
-    max_score: int
-    feedback: str | None
+    guest_username: str | None
+    guest_email: str | None
+    total_score: float
+    already_evaluated: bool = False
 
     class Config:
         from_attributes = True

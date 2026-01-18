@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.schemas.interview import AnswerRequest, StartInterviewRequest
-from app.services.authService import get_current_user,get_current_guest
+
 from app.services.interviewservice import InterviewService
 from app.db.session import get_db
+from app.services.getuserorguest import get_user_or_guest
 
 router = APIRouter(prefix="/interview", tags=["Interview"])
 
@@ -12,16 +13,26 @@ router = APIRouter(prefix="/interview", tags=["Interview"])
 def start_interview(
     payload: StartInterviewRequest,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-    guest_user = Depends(get_current_guest)
+    current_user=Depends(get_user_or_guest),
 ):
     service = InterviewService(db)
+    if current_user["type"] == "user":
+        user = current_user["data"]
+        user_id = user.id
+        guest_id = None
+
+    elif current_user["type"] == "guest":
+        user_id = None
+        guest_id = current_user["data"]["guest_id"]
+
+    else:
+        raise HTTPException(401, "Invalid authentication")
 
     result = service.start_interview_session(
         role=payload.role,
         level=payload.level,
-        guest_id=guest_user.id,
-        user_id=current_user.id,
+        guest_id=guest_id,
+        user_id=user_id,
     )
 
     return {
@@ -66,4 +77,10 @@ def evaluate_interview(
     db: Session = Depends(get_db),
 ):
     service = InterviewService(db)
-    return service.evaluate_interview(session_id)
+    result = service.evaluate_interview(session_id)
+    return {
+        "score": f"{result['total_score']}/5",
+        "numeric_score": result["total_score"],
+        "feedback": result["feedback"],
+        "already_evaluated": result["already_evaluated"],
+    }
