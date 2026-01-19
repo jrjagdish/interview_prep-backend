@@ -1,3 +1,4 @@
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy import Column, Integer, Text, ForeignKey, DateTime, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -8,7 +9,7 @@ class InterviewAnswer(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
-    session_id = Column(Integer, ForeignKey("interview_sessions.id"), nullable=False)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("interview_sessions.id"), nullable=False)
     question_id = Column(Integer, ForeignKey("interview_questions.id"), nullable=False)
 
     answer_text = Column(Text, nullable=False)

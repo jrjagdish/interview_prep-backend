@@ -89,7 +89,7 @@ def get_current_guest(credentials: HTTPAuthorizationCredentials = Depends(bearer
 
         return {
             "guest_id": payload["guest_id"],
-            "session_id": payload["session_id"],
+            
         }
 
     except JWTError:

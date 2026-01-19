@@ -6,7 +6,7 @@ from app.models.interviewquestion import InterviewQuestion
 from app.models.interviewsession import InterviewSession
 from app.ai.interviewagent import InterviewAgent
 from app.core.config import settings
-from uuid import UUID
+from uuid import UUID, uuid4
 
 
 class InterviewService:
@@ -18,6 +18,7 @@ class InterviewService:
         self,
         role: str,
         level: str,
+        admin_id: UUID,
         guest_id: UUID | None = None,
         user_id: UUID | None = None,
     ):
@@ -50,9 +51,10 @@ class InterviewService:
             raise HTTPException(400, "Active interview already exists")
 
         # Generate questions
-        questions = self.agent.generate_questions(count=6, role=role, level=level)
+        questions = self.agent.generate_questions(count=6, role=role, level=level,seed=str(user_id or guest_id) + str(uuid4()))
 
         session = InterviewSession(
+            admin_id=admin_id,
             user_id=user_id,
             guest_user_id=guest_id,
             total_questions=len(questions),
@@ -82,7 +84,7 @@ class InterviewService:
 
     # ---------------- INTERVIEW FLOW ---------------- #
 
-    def get_current_question(self, session_id: int):
+    def get_current_question(self, session_id: UUID):
         session = self._get_active_session(session_id)
 
         if session.current_question_index >= session.total_questions:
@@ -99,7 +101,7 @@ class InterviewService:
 
         return session.current_question_index, question.question_text
 
-    def submit_answer(self, session_id: int, answer: str):
+    def submit_answer(self, session_id: UUID, answer: str):
         with self.db.begin():
 
             session = (
@@ -156,10 +158,7 @@ class InterviewService:
             # If completed
             if session.current_question_index >= session.total_questions:
                 session.status = "COMPLETED"
-                return {
-                    "completed": True,
-                    "message": "Interview completed. Ready for evaluation.",
-                }
+                return {"completed": True}
 
             # Fetch next question
             next_question = (
@@ -177,10 +176,9 @@ class InterviewService:
                 "question": next_question.question_text,
             }
 
-
     # ---------------- EVALUATE ---------------- #
 
-    def evaluate_interview(self, session_id: int):
+    def evaluate_interview(self, session_id: UUID):
         session = self.db.get(InterviewSession, session_id)
 
         if not session or session.status != "COMPLETED":
@@ -229,7 +227,7 @@ class InterviewService:
 
     # ---------------- INTERNAL ---------------- #
 
-    def _get_active_session(self, session_id: int) -> InterviewSession:
+    def _get_active_session(self, session_id: UUID) -> InterviewSession:
         session = self.db.get(InterviewSession, session_id)
 
         if not session or session.status != "IN_PROGRESS":

@@ -1,3 +1,4 @@
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy import Column, Integer, Text, Float, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -9,7 +10,7 @@ class InterviewEvaluation(Base):
     id = Column(Integer, primary_key=True, index=True)
 
     session_id = Column(
-        Integer,
+        UUID(as_uuid=True),
         ForeignKey("interview_sessions.id"),
         unique=True,
         nullable=False

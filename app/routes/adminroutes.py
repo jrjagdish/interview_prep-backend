@@ -1,25 +1,39 @@
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.schemas.admin import AdminSessionScoreOut, GuestCandidateOut
+from app.schemas.admin import AdminSessionScoreOut
 from app.services.adminservice import (
     delete_guest_candidate,
     delete_guest_session,
     get_session_score,
     list_guest_candidates,
 )
+from app.services.authService import get_current_user
 from app.utils.getadmin import admin_only
+from app.utils.security import create_invite_token
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
+
+@router.post("/invite-link", dependencies=[Depends(admin_only)])
+def create_invite_link(admin=Depends(admin_only)):
+    token = create_invite_token(str(admin.id))
+
+    invite_url = f"https://yourfrontend.com/guest/upload?token={token}"
+
+    return {
+        "invite_link": invite_url,
+        "expires_in": "24 hours",
+    }
 
 
 @router.get(
     "/guest-candidates/",
-    response_model=list[GuestCandidateOut],
     dependencies=[Depends(admin_only)],
 )
-def get_guest_candidates(db: Session = Depends(get_db)):
-    return list_guest_candidates(db)
+def get_guest_candidates(db: Session = Depends(get_db),current_admin=Depends(get_current_user)):
+    admin_id = current_admin.id
+    return list_guest_candidates(db,admin_id)
 
 
 @router.get(
@@ -27,8 +41,9 @@ def get_guest_candidates(db: Session = Depends(get_db)):
     response_model=AdminSessionScoreOut,
     dependencies=[Depends(admin_only)],
 )
-def get_session_score_view(session_id: int, db: Session = Depends(get_db)):
-    eval_result = get_session_score(db, session_id)
+def get_session_score_view(session_id: UUID , db: Session = Depends(get_db),current_admin=Depends(get_current_user)):
+    admin_id = current_admin.id
+    eval_result = get_session_score(db, session_id,admin_id)
 
     if not eval_result:
         raise HTTPException(status_code=404, detail="Score not found")
@@ -48,7 +63,7 @@ def get_session_score_view(session_id: int, db: Session = Depends(get_db)):
 
 
 @router.delete("/sessions/{session_id}", dependencies=[Depends(admin_only)])
-def remove_guest_session(session_id: int, db: Session = Depends(get_db)):
+def remove_guest_session(session_id: UUID , db: Session = Depends(get_db)):
     if not delete_guest_session(db, session_id):
         raise HTTPException(status_code=404, detail="Guest session not found")
 

@@ -14,14 +14,16 @@ class InterviewAgent:
             temperature=0
         )
 
-    def generate_questions(self, count: int, level: str, role: str) -> list[str]:
+    def generate_questions(self, count: int, level: str, role: str,seed:str | None=None ) -> list[str]:
         parser = PydanticOutputParser(pydantic_object=QuestionList)
+        seed_text = f"Use this session id to generate unique questions: {seed}" if seed else ""
 
         prompt = PromptTemplate(
             template=QUESTION_PROMPT + "\n{format_instructions}",
             input_variables=["count", "level", "role"],
             partial_variables={
-                "format_instructions": parser.get_format_instructions()
+                "format_instructions": parser.get_format_instructions(),
+                "seed_text": seed_text,
             }
         )
 
