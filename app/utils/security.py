@@ -62,3 +62,12 @@ def create_guest_token(guest_id: str) -> str:
         settings.SECRET_KEY,
         algorithm=settings.ALGORITHM,
     )
+
+def create_refresh_token(user_id: str) -> str:
+    payload = {
+        "sub": user_id,
+        "type": "refresh",
+        "exp": datetime.utcnow() + timedelta(days=7),
+    }
+    return jwt.encode(payload, settings.REFRESH_SECRET_KEY, algorithm=settings.ALGORITHM)
+

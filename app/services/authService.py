@@ -4,8 +4,8 @@ from app.models.users import User
 from app.db.session import get_db
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from fastapi import HTTPException, status, Depends
-from app.utils.security import create_access_token,verify_access_token
+from fastapi import HTTPException, Response, status, Depends
+from app.utils.security import create_access_token,verify_access_token,create_refresh_token
 from app.schemas.auth import UserCreate
 from app.core.config import settings
 
@@ -15,10 +15,20 @@ bearer_guest = HTTPBearer(auto_error=True)
 
 
 def register_user(user:UserCreate,db:Session=Depends(get_db)):
-    
+    is_company_email = user.email.endswith("@company.com")
     existing_user = db.query(User).filter(User.email == user.email).first()
     if existing_user:
         raise ValueError("User with this email already exists.")
+    if user.role == "admin" and not is_company_email:
+        raise HTTPException(
+            status_code=400,
+            detail="Admin registration requires a company email. Use user registration instead."
+        )
+    if user.role == "user" and is_company_email:
+        raise HTTPException(
+            status_code=400,
+            detail="Company email detected. Please use admin registration."
+        )
     db_user=User(
         email=user.email,
         role = user.role,
@@ -38,7 +48,7 @@ def register_user(user:UserCreate,db:Session=Depends(get_db)):
         )  
     return db_user
 
-def login_user(email:str,password:str,db:Session=Depends(get_db)):
+def login_user(email:str,password:str,response: Response,db:Session=Depends(get_db)):
     user=db.query(User).filter(User.email==email).first()
     if not user:
         raise HTTPException(
@@ -51,7 +61,42 @@ def login_user(email:str,password:str,db:Session=Depends(get_db)):
             detail="Incorrect password"
         )
     access_token = create_access_token(data={"sub": user.email , "role": user.role})
+    refresh_token = create_refresh_token(str(user.id))
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=7 * 24 * 60 * 60,
+    )
     return {"access_token": access_token, "token_type": "bearer"}
+def refresh_access_token(db: Session, refresh_token: str) -> str:
+    try:
+        payload = jwt.decode(
+            refresh_token,
+            settings.REFRESH_SECRET_KEY,
+            algorithms=[settings.ALGORITHM],
+        )
+
+        if payload.get("type") != "refresh":
+            raise HTTPException(401, "Invalid token type")
+
+        user_id = payload["sub"]
+
+    except JWTError:
+        raise HTTPException(401, "Invalid or expired refresh token")
+
+    user = (
+        db.query(User)
+        .filter(User.id == user_id, User.is_active == True)
+        .first()
+    )
+
+    if not user:
+        raise HTTPException(401, "User not found")
+
+    return create_access_token(data={"sub": user.email , "role": user.role})
 
 def get_current_user(credentials:HTTPAuthorizationCredentials = Depends(bearer_scheme),db:Session=Depends(get_db)):
     token = credentials.credentials
