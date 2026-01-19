@@ -8,11 +8,11 @@ from app.models.users import User, GuestUser
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-@router.post("/register", response_model=UserCreate)
+@router.post("/register")
 def register(user: UserCreate, db: Session = Depends(get_db)):
     try:
         db_user = register_user(user, db)
-        return db_user
+        return {"message":"registered"}
     except ValueError as ve:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

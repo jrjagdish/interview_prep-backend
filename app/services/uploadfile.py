@@ -1,3 +1,5 @@
+
+from app.core import cloudinary
 import cloudinary.uploader
 from fastapi import HTTPException, UploadFile
 
@@ -15,9 +17,13 @@ async def upload_pdf_to_cloudinary(file: UploadFile) -> str:
 
     result = cloudinary.uploader.upload(
         contents,
+        
         resource_type="raw",
         folder="resumes",
         format="pdf"
     )
 
-    return result["secure_url"]
+    return {
+        "url": result.get("secure_url"),
+        "public_id": result.get("public_id")
+    }
