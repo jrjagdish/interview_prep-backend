@@ -6,12 +6,13 @@ from app.schemas.interview import AnswerRequest, StartInterviewRequest
 from app.services.authService import get_current_guest, get_current_user
 from app.services.interviewservice import InterviewService
 from app.db.session import get_db
-from app.services.getuserorguest import get_user_or_guest
+
 
 router = APIRouter(prefix="/interview", tags=["Interview"])
+user = get_current_user
+print(user)
 
-
-@router.post("/interview/start")
+@router.post("/start")
 def start_interview(
     payload: StartInterviewRequest,
     db: Session = Depends(get_db),
@@ -30,6 +31,7 @@ def start_interview(
 
     else:
         raise HTTPException(401, "Invalid authentication")
+    
 
     result = service.start_interview_session(
         role=payload.role,

@@ -47,7 +47,7 @@ def verify_access_token(token: str):
         return None
 
 
-from app.core.config import settings
+
 
 
 def create_guest_token(guest_id: str) -> str:
@@ -69,5 +69,5 @@ def create_refresh_token(user_id: str) -> str:
         "type": "refresh",
         "exp": datetime.utcnow() + timedelta(days=7),
     }
-    return jwt.encode(payload, settings.REFRESH_SECRET_KEY, algorithm=settings.ALGORITHM)
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 

@@ -24,13 +24,14 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/login")
-def login(user: UserLogin,response: Response, db: Session = Depends(get_db)):
-    return login_user(user.email, user.password,response, db)
+def login(user: UserLogin, response: Response, db: Session = Depends(get_db)):
+    return login_user(user.email, user.password, response, db)
 
 
 @router.post("/refresh")
 def refresh(
     request: Request,
+    response: Response,  # Add Response here
     db: Session = Depends(get_db),
 ):
     refresh_token = request.cookies.get("refresh_token")
@@ -39,13 +40,39 @@ def refresh(
 
     new_access_token = refresh_access_token(db, refresh_token)
 
+    # Update the access_token cookie
+    response.set_cookie(
+        key="access_token",
+        value=new_access_token,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        max_age=3600,
+    )
+
+    return {"message": "Token refreshed"}
+
+
+@router.get("/me")
+def read_users_me(current_user: User = Depends(get_current_user)):
+    # current_user is provided by the dependency we wrote earlier
+    name = current_user.email.split("@")[0]
     return {
-        "access_token": new_access_token,
-        "token_type": "bearer",
+        "email": current_user.email,
+        "full_name": name,
+        "role": current_user.role,
+        "id": current_user.id,
+        # You can add logic here to fetch real stats from other tables
+        "stats": {"total_interviews": 12, "success_rate": 78, "skills_count": 5},
     }
 
 
 @router.post("/logout")
 def logout(response: Response):
     response.delete_cookie("refresh_token")
+    response.delete_cookie(
+        key="access_token",
+        httponly=True,
+        samesite="lax",
+    )
     return {"message": "Logged out"}
