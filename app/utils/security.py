@@ -1,6 +1,6 @@
 from fastapi import HTTPException
 from jose import JWTError, jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.core.config import settings
 
 def create_invite_token(admin_id: str) -> str:
@@ -26,10 +26,11 @@ def decode_invite_token(token: str):
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
     to_encode["type"] = "user"
+    now = datetime.now(timezone.utc)
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = now + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
+        expire = now + timedelta(minutes=15)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(
         to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM

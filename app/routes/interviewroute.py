@@ -10,7 +10,7 @@ from app.db.session import get_db
 
 router = APIRouter(prefix="/interview", tags=["Interview"])
 user = get_current_user
-print(user)
+
 
 @router.post("/start")
 def start_interview(

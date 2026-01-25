@@ -69,8 +69,8 @@ def login_user(
         value=access_token,
         httponly=True,
         max_age=3600 * 24,
-        samesite="none",
-        secure=True,
+        samesite="lax", 
+        secure=False,
     )
 
     refresh_token = create_refresh_token(str(user.id))
