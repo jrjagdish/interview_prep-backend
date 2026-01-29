@@ -1,24 +1,23 @@
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Boolean, Column
-from app.db.base import Base
-import uuid
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Text, func
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
-from passlib.context import CryptContext
-from datetime import datetime
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
+from app.db.base import Base
+import uuid
 
 class User(Base):
     __tablename__ = "users"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
-    username = Column(String,nullable=True)
+    username = Column(String, nullable=True)
     hashed_password = Column(String, nullable=True)
-    role = Column(String, default="user")
+    google_id = Column(String, unique=True, nullable=True) # For OAuth
+    role = Column(String, default="user") # user, admin, b2b_manager
     is_active = Column(Boolean, default=True)
-    joined_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    joined_at = Column(DateTime, server_default=func.now())
+
+    # Relationships
+    profile = relationship("Profile", back_populates="user", uselist=False, cascade="all, delete-orphan")
     interview_sessions = relationship(
         "InterviewSession",
         foreign_keys="InterviewSession.user_id",
@@ -32,32 +31,25 @@ class User(Base):
         cascade="all, delete-orphan",
     )
 
-    def hash_password(self, password: str):
-        self.hashed_password = pwd_context.hash(password)
+class Profile(Base):
+    __tablename__ = "profiles"
 
-    def verify_password(self, password: str) -> bool:
-        return pwd_context.verify(password, self.hashed_password)
-
+    id = Column(Integer, primary_key=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+    skills = Column(Text, nullable=True) # Store as comma-separated or JSON
+    is_paid_user = Column(Boolean, default=False)
+    interview_credits = Column(Integer, default=3) # B2C monetization
+    resume_url = Column(String, nullable=True)
+    
+    user = relationship("User", back_populates="profile")
 
 class GuestUser(Base):
     __tablename__ = "guest_users"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    username = Column(String, unique=True, index=True, nullable=False)
-    email = Column(String, unique=True, index=True, nullable=False)
+    username = Column(String, nullable=False)
+    email = Column(String, index=True, nullable=False)
     pdf_url = Column(String, nullable=False)
     admin_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    cloudinary_public_id = Column(String, nullable=True)
-    joined_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    interview_sessions = relationship(
-        "InterviewSession",
-        back_populates="guest_user",
-        cascade="all, delete-orphan",
-    )
+    joined_at = Column(DateTime, server_default=func.now())
 
-    admin = relationship(
-        "User",
-        foreign_keys=[admin_id],
-    )
-
-    def __str__(self):
-        return f"GuestUser(username={self.username}, email={self.email})"
+    interview_sessions = relationship("InterviewSession", back_populates="guest_user")

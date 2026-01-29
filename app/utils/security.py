@@ -1,73 +1,87 @@
 from fastapi import HTTPException
 from jose import JWTError, jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.core.config import settings
 
-def create_invite_token(admin_id: str) -> str:
+# Helper for consistent timezone-aware "now"
+def get_now():
+    return datetime.now(timezone.utc)
+
+def create_access_token(data: dict, expires_delta: timedelta = None):
+    """
+    Standard Access Token. 
+    Impact: Explicitly sets type='user' and includes 'role' from data.
+    """
+    to_encode = data.copy()
+    expire = get_now() + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+    
+    # Ensure type is set to prevent token-swapping attacks
+    to_encode.update({"exp": expire, "type": "user"})
+    
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+def create_refresh_token(user_id: str) -> str:
+    """
+    Refresh Token for rotating sessions.
+    Impact: Longer expiry, strictly type='refresh'.
+    """
     payload = {
-        "admin_id": admin_id,
-        "type": "invite",
-        "exp": datetime.utcnow() + timedelta(hours=24),
+        "sub": str(user_id),
+        "type": "refresh",
+        "exp": get_now() + timedelta(days=7),
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
-def decode_invite_token(token: str):
-    try:
-        payload = jwt.decode(
-            token,
-            settings.SECRET_KEY,
-            algorithms=[settings.ALGORITHM],
-        )
-        if payload.get("type") != "invite":
-            raise HTTPException(401, "Invalid invite token")
-        return payload["admin_id"]
-    except JWTError:
-        raise HTTPException(401, "Invite link expired or invalid")
-    
-def create_access_token(data: dict, expires_delta: timedelta = None):
+
+def create_guest_token(data: dict) -> str:
+    """
+    Impact: Changed to accept a dict to allow 'admin_id' and 'guest_id' 
+    to be stored inside the token for better session validation.
+    """
     to_encode = data.copy()
-    to_encode["type"] = "user"
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(
-        to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM
-    )
-    return encoded_jwt
+    expire = get_now() + timedelta(hours=4) # Guests usually need more than 30 mins
+    to_encode.update({"exp": expire, "type": "guest"})
 
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
-def verify_access_token(token: str):
+def create_invite_token(admin_id: str) -> str:
+    """
+    Token used in the 'Invite Link' URL.
+    """
+    payload = {
+        "admin_id": str(admin_id),
+        "type": "invite",
+        "exp": get_now() + timedelta(hours=24),
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+def verify_token(token: str, expected_type: str):
+    """
+    Central verifier that checks signature AND the 'type' claim.
+    """
     try:
         payload = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+            token, 
+            settings.SECRET_KEY, 
+            algorithms=[settings.ALGORITHM]
         )
+        
+        # This is the critical security check
+        if payload.get("type") != expected_type:
+            return None
+            
         return payload
     except JWTError:
         return None
 
+# Use these in your dependencies (get_current_user, get_current_guest, etc.)
+def verify_access_token(token: str):
+    return verify_token(token, expected_type="user")
 
-from app.core.config import settings
+def verify_guest_token(token: str):
+    return verify_token(token, expected_type="guest")
 
+def verify_invite_token(token: str):
+    return verify_token(token, expected_type="invite")
 
-def create_guest_token(guest_id: str) -> str:
-    payload = {
-        "type": "guest",
-        "guest_id": guest_id,
-        "exp": datetime.utcnow() + timedelta(minutes=30),
-    }
-
-    return jwt.encode(
-        payload,
-        settings.SECRET_KEY,
-        algorithm=settings.ALGORITHM,
-    )
-
-def create_refresh_token(user_id: str) -> str:
-    payload = {
-        "sub": user_id,
-        "type": "refresh",
-        "exp": datetime.utcnow() + timedelta(days=7),
-    }
-    return jwt.encode(payload, settings.REFRESH_SECRET_KEY, algorithm=settings.ALGORITHM)
-
+def verify_refresh_token(token: str):
+    return verify_token(token, expected_type="refresh")

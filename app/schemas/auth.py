@@ -10,3 +10,12 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+    
+class UserResponse(BaseModel):
+    id: str
+    email: EmailStr
+    full_name: Optional[str] = None
+    role: str
+
+    class Config:
+        from_attributes = True
