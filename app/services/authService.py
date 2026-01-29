@@ -1,164 +1,88 @@
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import JWTError, jwt
-from app.models.users import User
-from app.db.session import get_db
-from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException, Request, Response, status, Depends
-from app.utils.security import (
-    create_access_token,
-    verify_access_token,
-    create_refresh_token,
-)
+from jose import JWTError, jwt
+from sqlalchemy.orm import Session
+from datetime import timedelta
+from uuid import UUID
+
+from app.models.users import User, Profile # Import Profile
+from app.db.session import get_db
 from app.schemas.auth import UserCreate
+from app.utils.security import create_access_token, verify_access_token, create_refresh_token
 from app.core.config import settings
 
-bearer_scheme = HTTPBearer(auto_error=True)
+# --- FIXING CORS/COOKIE ISSUES ---
+# If frontend is on :3000 and backend on :8000, 
+# SameSite must be 'Lax' or 'None' (if using HTTPS)
+COOKIE_SETTINGS = {
+    "httponly": True,
+    "samesite": "lax", 
+    "secure": settings.ENVIRONMENT == "production", # False for localhost
+}
 
-bearer_guest = HTTPBearer(auto_error=True)
+def register_user(user_schema:UserCreate, db: Session):
+    # 1. Validation Logic
+    is_company = user_schema.email.endswith("@company.com")
+    if user_schema.role == "admin" and not is_company:
+        raise HTTPException(400, "Admins must use company emails.")
+    
+    existing = db.query(User).filter(User.email == user_schema.email).first()
+    if existing:
+        raise HTTPException(409, "Email already registered.")
 
-
-def register_user(user: UserCreate, db: Session = Depends(get_db)):
-    is_company_email = user.email.endswith("@company.com")
-    existing_user = db.query(User).filter(User.email == user.email).first()
-    if existing_user:
-        raise ValueError("User with this email already exists.")
-    if user.role == "admin" and not is_company_email:
-        raise HTTPException(
-            status_code=400,
-            detail="Admin registration requires a company email. Use user registration instead.",
-        )
-    if user.role == "user" and is_company_email:
-        raise HTTPException(
-            status_code=400,
-            detail="Company email detected. Please use admin registration.",
-        )
-    db_user = User(
-        email=user.email,
-        role=user.role,
+    # 2. Create User
+    new_user = User(
+        email=user_schema.email,
+        role=user_schema.role,
+        username=user_schema.username
     )
-    db_user.hash_password(user.password)
-    try:
-        db.add(db_user)
-        db.commit()
-        db.refresh(db_user)
+    new_user.hash_password(user_schema.password)
+    
+    db.add(new_user)
+    db.flush() # Get ID for profile
 
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
-        )
-    return db_user
+    # 3. Create Profile (New requirement)
+    new_profile = Profile(user_id=new_user.id)
+    db.add(new_profile)
+    
+    db.commit()
+    db.refresh(new_user)
+    return new_user
 
-
-def login_user(
-    email: str, password: str, response: Response, db: Session = Depends(get_db)
-):
+def login_user(email: str, password: str, response: Response, db: Session):
     user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
-    if not user.verify_password(password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect password"
-        )
-    access_token = create_access_token(data={"sub": user.email, "role": user.role})
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        httponly=True,
-        max_age=3600 * 24,
-        samesite="lax", 
-        secure=False,
-    )
+    if not user or not user.verify_password(password):
+        raise HTTPException(401, "Invalid credentials")
 
-    refresh_token = create_refresh_token(str(user.id))
+    # 4. Generate Tokens with Role & ID
+    access_token = create_access_token(data={
+        "sub": user.email, 
+        "id": str(user.id), 
+        "role": user.role,
+        "type": "user" 
+    })
+    
+    refresh_token = create_refresh_token(data={
+        "sub": str(user.id),
+        "type": "refresh"
+    })
 
-    response.set_cookie(
-        key="refresh_token",
-        value=refresh_token,
-        httponly=True,
-        secure=False,  # MUST match access_token (False for http)
-        samesite="lax",
-        max_age=7 * 24 * 60 * 60,
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+    # 5. Set HttpOnly Cookies
+    response.set_cookie(key="access_token", value=access_token, **COOKIE_SETTINGS, max_age=3600)
+    response.set_cookie(key="refresh_token", value=refresh_token, **COOKIE_SETTINGS, max_age=604800)
 
-
-def refresh_access_token(db: Session, refresh_token: str) -> str:
-    try:
-        payload = jwt.decode(
-            refresh_token,
-            settings.SECRET_KEY,
-            algorithms=[settings.ALGORITHM],
-        )
-
-        if payload.get("type") != "refresh":
-            raise HTTPException(401, "Invalid token type")
-
-        user_id = payload["sub"]
-
-    except JWTError:
-        raise HTTPException(401, "Invalid or expired refresh token")
-
-    user = db.query(User).filter(User.id == user_id, User.is_active == True).first()
-
-    if not user:
-        raise HTTPException(401, "User not found")
-
-    return create_access_token(data={"sub": user.email, "role": user.role})
-
+    return {"message": "Logged in successfully", "role": user.role}
 
 def get_current_user(request: Request, db: Session = Depends(get_db)):
-    print(f"DEBUG: All Cookies: {request.cookies}")
     token = request.cookies.get("access_token")
-
     if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication cookie missing",
-        )
-    print(f"DEBUG: Token: {token}")
+        raise HTTPException(401, "Authentication required")
+
     payload = verify_access_token(token)
-    print(f"DEBUG: Payload: {payload}")
-    if payload is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
-        )
-    email: str = payload.get("sub")
-    print(f"DEBUG: Sub: {email}, Type: {payload.get('type')}")
+    if not payload or payload.get("type") != "user":
+        raise HTTPException(401, "Invalid session")
 
-    if email is None or payload.get("type") != "user":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload"
-        )
-    user = db.query(User).filter(User.email == email).first()
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
+    user = db.query(User).filter(User.email == payload.get("sub")).first()
+    if not user:
+        raise HTTPException(404, "User no longer exists")
+    
     return user
-
-
-def get_current_guest(request: Request):
-    token = request.cookies.get("guest_token")
-
-    if not token:
-        raise HTTPException(status_code=401, detail="Guest session missing")
-    try:
-        payload = jwt.decode(
-            token,
-            settings.SECRET_KEY,
-            algorithms=[settings.ALGORITHM],
-        )
-
-        if payload.get("type") != "guest":
-            raise HTTPException(401, "Invalid token type")
-
-        return {
-            "guest_id": payload["guest_id"],
-        }
-
-    except JWTError:
-        raise HTTPException(401, "Invalid or expired guest token")
