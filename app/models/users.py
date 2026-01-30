@@ -3,6 +3,8 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
 from app.db.base import Base
 import uuid
+import bcrypt
+
 
 class User(Base):
     __tablename__ = "users"
@@ -30,6 +32,15 @@ class User(Base):
         back_populates="admin",
         cascade="all, delete-orphan",
     )
+
+    def hash_password(self, password: str):
+        self.hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        
+    def verify_password(self, password: str) -> bool:
+        if not self.hashed_password:
+            return False
+        return bcrypt.checkpw(password.encode('utf-8'), self.hashed_password.encode('utf-8'))
+
 
 class Profile(Base):
     __tablename__ = "profiles"
