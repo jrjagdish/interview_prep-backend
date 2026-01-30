@@ -5,7 +5,7 @@ class QuestionList(BaseModel):
     questions: List[str]
 
 class EvaluationResult(BaseModel):
-    total_score: float
+    score: float
     strengths: List[str]
     weaknesses: List[str]
-    overall_feedback: str
+    feedback: str
