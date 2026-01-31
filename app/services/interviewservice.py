@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 from app.ai.interviewagent import InterviewAgent
 from app.models.interview import InterviewSession, InterviewQA
 from app.core.config import settings
+from app.models.users import Profile
 
 class InterviewService:
     def __init__(self, db: Session):
@@ -16,7 +17,7 @@ class InterviewService:
         if user_id is None and guest_id is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Identity missing.")
 
-        # 1. Create Session first
+        
         title = f"{level.capitalize()} {role.capitalize()} Mock Interview"
         session = InterviewSession(
             user_id=user_id,
@@ -27,13 +28,13 @@ class InterviewService:
             status="IN_PROGRESS"
         )
         self.db.add(session)
-        self.db.flush() # Get session.id
+        self.db.flush() 
 
-        # 2. Generate ONLY the first question
+        
         questions = self.ai_agent.generate_questions(count=1, level=level, role=role)
         first_q = questions[0] if questions else "Can you tell me about your experience?"
 
-        # 3. Save first QA
+       
         qa_entry = InterviewQA(
             session_id=session.id, 
             question_text=first_q, 
@@ -41,6 +42,12 @@ class InterviewService:
         )
         self.db.add(qa_entry)
         self.db.commit()
+        data = self.db.query(Profile).filter(Profile.user_id == user_id).first()
+        if data.interview_credits <=0:
+            raise HTTPException(status_code=400, detail="Insufficient interview credits.")
+        else:
+            data.interview_credits -=1
+            self.db.commit()
 
         return {"session_id": session.id, "title": session.title, "question": first_q}
 
@@ -49,7 +56,7 @@ class InterviewService:
         if not session or session.status == "COMPLETED":
             raise HTTPException(status_code=400, detail="Session inactive.")
 
-        # 1. Get current QA record
+       
         qa_entry = self.db.query(InterviewQA).filter(
             InterviewQA.session_id == session_id,
             InterviewQA.question_index == session.current_question_index
@@ -57,22 +64,20 @@ class InterviewService:
 
         if not qa_entry: raise HTTPException(404, "Question not found")
 
-        # 2. Get AI Feedback for the CURRENT answer
-        # We pass the single Q&A to the evaluation tool
+        
         eval_result = self.ai_agent.evaluate_single_answer(qa_entry.question_text, answer)
         
         qa_entry.user_answer = answer
         qa_entry.ai_feedback = eval_result.feedback
         qa_entry.score = eval_result.score
         
-        # 3. Prepare for next step
+        
         session.current_question_index += 1
         completed = session.current_question_index >= self.MAX_QUESTIONS
 
         next_question_text = None
         if not completed:
-            # 4. Generate NEXT question based on previous context
-            # Pass history so AI doesn't repeat itself
+          
             history = [{"q": qa.question_text, "a": qa.user_answer} for qa in session.qa_history if qa.user_answer]
             next_q_list = self.ai_agent.generate_questions(
                 count=1, level=session.title, role="", history=history

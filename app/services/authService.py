@@ -92,3 +92,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(404, "User no longer exists")
 
     return user
+
+def get_profile_data(db,id:UUID):
+    data = db.query(User).join(User.profile).filter(User.id == id).first()
+    return data
