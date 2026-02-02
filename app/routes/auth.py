@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.services.authService import (
     create_refresh_token,
+    get_profile_data,
     register_user,
     login_user,
     get_current_user,
@@ -61,13 +62,15 @@ def refresh(
 
     return {"message": "Token refreshed"}
 
-@router.get("/me", response_model=UserResponse)
-def read_users_me(current_user: User = Depends(get_current_user)):
+@router.get("/me")
+def read_users_me(current_user: User = Depends(get_current_user),db: Session = Depends(get_db)):
     """
     Impact: Returns the current user profile. 
     Frontend uses this to populate the dashboard and check roles.
     """
-    return current_user
+    user_data = get_profile_data(db,current_user.id)
+    print(user_data.profile.interview_credits)
+    return user_data
 
 @router.post("/logout")
 def logout(response: Response):

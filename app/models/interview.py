@@ -45,6 +45,7 @@ class InterviewQA(Base):
     user_answer = Column(Text, nullable=True)
     ai_feedback = Column(Text, nullable=True) 
     score = Column(Integer, nullable=True) # 1-10 scale
+    question_index = Column(Integer, nullable=False)
     
     created_at = Column(DateTime, server_default=func.now())
 
