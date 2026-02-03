@@ -60,7 +60,7 @@ class InterviewService:
             raise HTTPException(
                 status_code=400, detail="Insufficient interview credits."
             )
-        else:
+        elif session.status == "COMPLETED":
             data.interview_credits -= 1
             self.db.commit()
 
