@@ -6,12 +6,13 @@ from livekit.plugins import deepgram, cartesia, silero
 
 # Your existing logic imports
 from app.db.session import SessionLocal
-from app.models.users import User,GuestUser
+from app.models.users import User, GuestUser
 from app.models.interview import InterviewSession, InterviewQA
-from app.ai.interviewagent import InterviewAgent 
+from app.ai.interviewagent import InterviewAgent
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
 
 class LiveKitInterviewAgent(voice.Agent):
     def __init__(self, db_session, interview_id):
@@ -23,19 +24,27 @@ class LiveKitInterviewAgent(voice.Agent):
         self.ai_logic = InterviewAgent(groq_api_key=settings.GROQ_API_KEY)
 
     async def start_interview(self):
-        """Custom method to trigger the first question"""
-        # 1. Fetch data from DB
-        session = self.db.query(InterviewSession).filter(InterviewSession.id == self.interview_id).first()
-        
-        # 2. Use your existing logic to get a question
-        history = [{"q": qa.question_text, "a": qa.user_answer} for qa in session.qa_history]
-        questions = self.ai_logic.generate_questions(count=1, level="medium", role="backend", history=history)
-        question_text = questions[0]
+        """Fetch the first question already created by the service and speak it."""
+        # 1. Fetch the session and the existing first question
+        session = (
+            self.db.query(InterviewSession)
+            .filter(InterviewSession.id == self.interview_id)
+            .first()
+        )
 
-        # 3. Save to DB
-        qa = InterviewQA(session_id=self.interview_id, question_text=question_text)
-        self.db.add(qa)
-        self.db.commit()
+        # Get the latest QA entry (which was created in InterviewService)
+        # We sort by question_index to make sure we get the current one
+        qa = (
+            self.db.query(InterviewQA)
+            .filter(InterviewQA.session_id == self.interview_id)
+            .order_by(InterviewQA.question_index.desc())
+            .first()
+        )
 
-        # 4. Speak it
-        await self.session.say(question_text)
+        if qa:
+            # 2. Just speak the text that is already in the DB
+            await self.session.say(qa.question_text)
+        else:
+            # Fallback if for some reason the service didn't create it
+            fallback_q = "Hello! I'm your interviewer. Can you tell me about yourself?"
+            await self.session.say(fallback_q)

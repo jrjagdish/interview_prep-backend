@@ -22,7 +22,7 @@ async def entrypoint(ctx: agents.JobContext):
     # This automatically handles the audio flow
     session = agents.voice.AgentSession(
         stt=deepgram.STT(),
-        tts=deepgram.TTS(),
+        tts=cartesia.TTS(),
         vad=silero.VAD.load(),
     )
 
