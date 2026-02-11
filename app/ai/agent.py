@@ -1,7 +1,11 @@
 import logging
 import json
+import asyncio
+import re
 from datetime import datetime
+import uuid
 from dotenv import load_dotenv
+
 from livekit import rtc
 from livekit.agents import (
     Agent,
@@ -12,133 +16,174 @@ from livekit.agents import (
     cli,
     inference,
     room_io,
-    llm
+    llm,
 )
 
-from livekit.plugins import noise_cancellation, silero
-from livekit.plugins.turn_detector.multilingual import MultilingualModel
-from typing import Annotated, TypedDict, Union
-
+from livekit.plugins import noise_cancellation, silero, langchain
+from typing import Annotated, TypedDict
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
-from livekit.plugins import langchain, silero
 from langchain_groq import ChatGroq
 
+from app.db.session import SessionLocal
+from app.models.interview import InterviewQA, InterviewSession
+# --- CRITICAL FIX: Import related models to resolve SQLAlchemy relationships ---
+from app.models.users import User, GuestUser 
 
 logger = logging.getLogger("agent")
-load_dotenv(".env.local")
-load_dotenv(".env")
+load_dotenv()
+
+server = AgentServer()
 
 class State(TypedDict):
-    # 'messages' is the standard key LangGraph uses for chat history
     messages: Annotated[list, add_messages]
     question_count: int
 
 def my_llm_node(state: State):
     count = state.get("question_count", 0)
-    _llm = ChatGroq(model="openai/gpt-oss-120b")
-    response = _llm.invoke(state["messages"])
+
     if count >= 6:
         return {
-            "messages": [("ai", "We have covered 6 questions today, which completes our session. Thank you!")],
-            "question_count": count
+            "messages": [
+                (
+                    "ai",
+                    "That was the final question. Thank you for your time today. Goodbye.",
+                )
+            ],
+            "question_count": count,
         }
-    # 3. Return the AIMessage object directly
-    return {"messages": [response],"question_count": count + 1} 
+
+    # --- PERFORMANCE FIX: Switched to a faster, high-quality model ---
+    llm_model = ChatGroq(model="llama-3.3-70b-versatile")
+    response = llm_model.invoke(state["messages"])
+
+    return {
+        "messages": [response],
+        "question_count": count + 1,
+    }
 
 def create_graph():
-    workflow = StateGraph(State)
-    workflow.add_node("agent", my_llm_node)
-    workflow.add_edge(START, "agent")
-    workflow.add_edge("agent", END)
-    return workflow.compile()  
+    g = StateGraph(State)
+    g.add_node("agent", my_llm_node)
+    g.add_edge(START, "agent")
+    g.add_edge("agent", END)
+    return g.compile()
 
-# --- NEW: THIS FUNCTION SAVES THE DATA WHEN THE SESSION ENDS ---
-async def on_session_end(ctx: JobContext) -> None:
-    # 1. Get the full summary of the talk
+async def on_session_end(ctx: JobContext):
     report = ctx.make_session_report()
-    
-    # 2. Dump everything to the file
-    with open("response.txt", "a", encoding="utf-8") as f:
-        f.write(f"\n--- NEW SESSION DUMP: {datetime.now()} ---\n")
-        # Convert the report object to a dictionary and then a formatted JSON string
-        f.write(json.dumps(report.to_dict(), indent=2))
-        f.write("\n" + "="*50 + "\n")
+    data = report.to_dict()
+    db = SessionLocal()
 
-    print(f"✅ Full session dump saved for room: {ctx.room.name}")
+    try:
+        raw_name = ctx.room.name
+        uuid_match = re.search(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', raw_name)
+        
+        if not uuid_match:
+            logger.error(f"❌ No valid UUID in room: {raw_name}")
+            return
+            
+        session_uuid = uuid.UUID(uuid_match.group(0))
 
-# ... (your imports and Graph code stay the same) ...
+        # Mark session completed
+        db.query(InterviewSession).filter(InterviewSession.id == session_uuid).update(
+            {"status": "COMPLETED", "completed_at": datetime.utcnow()}
+        )
+
+        history_items = data.get("chat_history", {}).get("items", [])
+        question_index = 0
+
+        for item in history_items:
+            if item.get("type") != "message":
+                continue 
+
+            role = item.get("role") 
+            text = " ".join(item.get("content", [])).strip()
+
+            if not text:
+                continue
+
+            db.add(
+                InterviewQA(
+                    session_id=session_uuid,
+                    question_index=question_index,
+                    chat_history=json.dumps({"role": role, "text": text}),
+                )
+            )
+            question_index += 1
+
+        db.commit()
+        logger.info(f"✅ Interview {session_uuid} saved to database.")
+    except Exception as e:
+        logger.error(f"❌ Database error: {e}")
+    finally:
+        db.close()
 
 class Assistant(Agent):
-    def __init__(self, user_id: str = "Unknown", user_name: str = "Guest") -> None:
+    def __init__(self, user_name: str):
         super().__init__(
-            instructions=f"""You are a helpful voice AI assistant. 
-            You are currently talking to {user_name} (ID: {user_id}).
-            Keep responses concise, friendly, and without complex formatting.""",
+            instructions=f"""
+You are a professional technical interviewer.
+1. Talk to {user_name}.
+2. Ask exactly ONE technical question at a time.
+3. You must WAIT for the user to finish their answer before asking the next question.
+4. If the user's answer is too brief, you may ask a follow-up, but keep the total questions to 6.
+5. After 6 questions, say goodbye.
+"""
         )
-server = AgentServer()
 
 def prewarm(proc: JobProcess):
     proc.userdata["vad"] = silero.VAD.load()
 
-server.setup_fnc = prewarm        
+server.setup_fnc = prewarm
 
 @server.rtc_session(on_session_end=on_session_end)
 async def my_agent(ctx: JobContext):
-    ctx.log_context_fields = {"room": ctx.room.name}
-    
-    # 1. Connect to the room first
     await ctx.connect()
-    
-    # 2. Identify the user (assuming one human user joins)
-    # We wait a brief moment or check the participants already in the room
-    user_id = "unknown"
-    user_name = "Guest"
-    
-    # Check if a participant is already there or wait for one
-    if ctx.room.remote_participants:
-        p = next(iter(ctx.room.remote_participants.values()))
-        try:
-            metadata = json.loads(p.metadata)
-            user_id = metadata.get("user_id", "unknown")
-            user_name = p.name or "User"
-            logger.info(f"Detected User: {user_id} ({user_name})")
-        except:
-            logger.warning("Could not parse participant metadata")
 
-    # 3. Setup Graph and LLM
+    participant = await ctx.wait_for_participant()
+    user_name = participant.name or "Candidate"
+
+    logger.info(f"Interview started with {user_name}")
+
     graph = create_graph()
     langgraph_llm = langchain.LLMAdapter(graph=graph)
 
     session = AgentSession(
-        stt=inference.STT(model="deepgram/nova-3", language="multi"),
+        stt=inference.STT(model="deepgram/nova-3"),
         llm=langgraph_llm,
-        tts=inference.TTS(model="cartesia/sonic-3", voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"),
+        tts=inference.TTS(model="cartesia/sonic-3"),
         vad=ctx.proc.userdata["vad"],
-        preemptive_generation=True,
+        min_endpointing_delay=1.5,
+        preemptive_generation=False,
     )
 
     @session.on("agent_speech_committed")
-    def on_speech_committed(msg: llm.ChatMessage):
-        content = msg.content.lower()
-        if "goodbye" in content or "interview is now complete" in content:
-            logger.info("Final question reached. Shutting down...")
-            ctx.shutdown()
+    def on_ai(msg: llm.ChatMessage):
+        state = (msg.metadata or {}).get("state", {})
+        if state.get("question_count", 0) >= 6:
+            async def shutdown():
+                await asyncio.sleep(2.0)
+                ctx.shutdown()
+            asyncio.create_task(shutdown())
 
-    # 4. Start session with the personalized Assistant
+    @ctx.room.on("participant_disconnected")
+    def on_left(_):
+        ctx.shutdown()
+
     await session.start(
-        agent=Assistant(user_id=user_id, user_name=user_name),
+        agent=Assistant(user_name),
         room=ctx.room,
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(
-                noise_cancellation=lambda params: noise_cancellation.BVC(),
+                noise_cancellation=lambda _: noise_cancellation.BVC(),
             ),
         ),
     )
 
-    await session.say(f"Hello {user_name}, I'm ready to help.", allow_interruptions=True)
-
-
+    await session.say(
+        f"Hello {user_name}, I'm your AI interviewer. Let's start the session.",
+        allow_interruptions=True,
+    )
 
 if __name__ == "__main__":
     cli.run_app(server)
