@@ -75,7 +75,7 @@ def login_user(email: str, password: str, response: Response, db: Session):
     except Exception as e:
         raise HTTPException(500, f"Failed to set cookies: {e}")
 
-    return {"message": "Logged in successfully", "role": user.role}
+    return {"message": "Logged in successfully", "role": user.role,"name":user.username}
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)):
