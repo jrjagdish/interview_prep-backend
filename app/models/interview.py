@@ -41,8 +41,7 @@ class InterviewQA(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id = Column(UUID(as_uuid=True), ForeignKey("interview_sessions.id", ondelete="CASCADE"))
     
-    question_text = Column(Text, nullable=False)
-    user_answer = Column(Text, nullable=True)
+    chat_history = Column(Text,nullable=False)
     ai_feedback = Column(Text, nullable=True) 
     score = Column(Integer, nullable=True) # 1-10 scale
     question_index = Column(Integer, nullable=False)

@@ -24,7 +24,7 @@ def create_invite_link(admin=Depends(admin_only)):
     token = create_invite_token(str(admin.id))
     
     # We use a setting for the base URL to make switching between localhost and prod easy
-    invite_url = f"{settings.FRONTEND_URL}/guest/register?token={token}"
+    invite_url = f"http://localhost:5173/guest/register?token={token}"
 
     return {
         "invite_link": invite_url,
