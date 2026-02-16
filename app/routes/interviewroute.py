@@ -1,5 +1,6 @@
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
+import requests
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.users import GuestUser, User
@@ -41,3 +42,13 @@ def start_user_interview(
         "session_id": new_session.id,
         "room_name": f"room_{new_session.id}",
     }
+
+
+@router.get("/history")
+def get_interview_history(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    data = db.query(InterviewSession).filter(InterviewSession.user_id == current_user.id).all()
+    return data
+
+
