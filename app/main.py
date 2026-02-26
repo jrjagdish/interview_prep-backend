@@ -1,5 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from app.ai.websocket import interview_socket
+from app.ai.websocket import interview_socket
 from app.db.init import init_db
 from app.routes import auth, adminroutes, guest,interviewroute
 
@@ -16,6 +18,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+@app.websocket("/ws/interview")
+async def interview(ws: WebSocket):
+    await interview_socket(ws)
 app.include_router(auth.router)
 app.include_router(adminroutes.router)
 app.include_router(guest.router)
