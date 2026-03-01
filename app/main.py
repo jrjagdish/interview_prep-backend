@@ -28,341 +28,112 @@
 # @app.get("/")
 # def read_root():
 #     return {"message": "Welcome to the Interview Preparation App!"}
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
-import io
-import httpx
-import speech_recognition as sr
-from gtts import gTTS
-import requests
-from app.core.config import settings
-from pydub import AudioSegment
-
-
-async def transcribe_audio(audio_bytes: bytes) -> str:
-    if len(audio_bytes) < 100:  # Ignore tiny "noise" packets
-        return ""
-
-    async with httpx.AsyncClient() as client:
-        try:
-            # We use 'detect_language' and 'nova-2' for best results
-            response = await client.post(
-                "https://api.deepgram.com/v1/listen",
-                headers={
-                    "Authorization": f"Token {settings.DEEPGRAM_API_KEY}",
-                    "Content-Type": "audio/webm",  # Most browsers use webm
-                },
-                params={"model": "nova-2", "smart_format": "true", "language": "en"},
-                content=audio_bytes,
-            )
-
-            if response.status_code != 200:
-                print(f"Deepgram Error: {response.status_code} - {response.text}")
-                return ""
-
-            res_json = response.json()
-            transcript = res_json["results"]["channels"][0]["alternatives"][0][
-                "transcript"
-            ]
-            return transcript
-
-        except Exception as e:
-            print(f"STT Exception: {e}")
-            return ""
-
-
-# def speak(text: str) -> bytes:
-#     if not text.strip():
-#         return b""
-        
-#     try:
-#         url = "https://api.cartesia.ai/tts/bytes"
-        
-#         headers = {
-#             "Authorization": f"Bearer {settings.CARTESIA_API_KEY}",
-#             "Cartesia-Version": "2024-06-10",
-#             "Content-Type": "application/json"
-#         }
-        
-#         # This is a standard, widely available voice ID (Baritone/Guy)
-#         # Using a fixed public ID is the "default" way for their REST API
-#         payload = {
-#             "transcript": text,
-#             "model_id": "sonic-3",
-#             "voice": {
-#                 "mode": "id",
-#                 "id": "6ccbfb76-1fc6-48f7-b71d-91ac6298247b" 
-#             },
-#             "output_format": {
-#                 "container": "mp3",
-#                 "sample_rate": 44100
-#             }
-#         }
-
-#         r = requests.post(url, headers=headers, json=payload)
-        
-#         if r.status_code == 200:
-#             print(f"Success: Generated {len(r.content)} bytes")
-#             return r.content
-#         else:
-#             print(f"Cartesia Error {r.status_code}: {r.text}")
-#             return b""
-
-#     except Exception as e:
-#         print(f"Exception in speak: {e}")
-#         return b""
-
-
-# app = FastAPI()
-
-
-
-recongizer = sr.Recognizer()
-
-
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-
-    async def send_personal_message(self, message: str, websocket: WebSocket):
-        await websocket.send_text(message)
-
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            await connection.send_text(message)
-
-
-manager = ConnectionManager()
-
-
-
-
-
-# @app.websocket("/ws/{client_id}")
-# async def websocket_endpoint(websocket: WebSocket, client_id: int):
-#     await manager.connect(websocket)
-#     try:
-#         while True:
-#             data = await websocket.receive_bytes()
-
-#             text = await transcribe_audio(data)
-#             await manager.send_personal_message(f"You said: {text}", websocket)
-#             response_text = f"Echo: {text}"
-#             audio_bytes = speak(response_text)
-
-#             await websocket.send_bytes(audio_bytes)
-#             await manager.broadcast(f"Client #{client_id} says: {text}")
-#     except WebSocketDisconnect:
-#         manager.disconnect(websocket)
-#         await manager.broadcast(f"Client #{client_id} left the chat")
-
-import io
-import httpx
 import asyncio
-import requests
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
-from app.core.config import settings
+import os
+import json
+import base64
+from typing import AsyncIterator
+from dotenv import load_dotenv
+from fastapi import FastAPI, WebSocket
+from langchain_groq import ChatGroq
+from langchain_core.messages import SystemMessage, HumanMessage
+
+# Import the helper classes from your local files 
+# (Or paste the class definitions here if they aren't in the path)
+from app.ai.assemblyai_stt import AssemblyAISTT
+from app.ai.tts_cartesia import CartesiaTTS
+from app.utils.helper import merge_async_iters
+from app.utils.events import STTOutputEvent, AgentChunkEvent, AgentEndEvent, event_to_dict
+from fastapi.middleware.cors import CORSMiddleware
+
+
+
+# Add this block right after 'app = FastAPI()'
+
+
+load_dotenv()
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # For production, replace "*" with your frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# 1. Faster Async TTS Function
-async def speak_async(text: str) -> bytes:
-    if not text.strip():
-        return b""
+# 1. THE BRAIN (LLM)
+llm = ChatGroq(model="llama-3.3-70b-versatile", streaming=True)
+
+async def interview_brain(transcript: str) -> AsyncIterator:
+    """Processes text and yields streaming agent chunks."""
+    system_prompt = "You are a friendly technical interviewer. Keep responses under 2 sentences."
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=transcript)
+    ]
     
-    # Using httpx.AsyncClient is significantly faster than requests.post
-    async with httpx.AsyncClient() as client:
+    async for chunk in llm.astream(messages):
+        yield AgentChunkEvent.create(chunk.content)
+    yield AgentEndEvent.create()
+
+async def run_pipeline(audio_stream: AsyncIterator[bytes], websocket: WebSocket):
+    stt = AssemblyAISTT(sample_rate=16000)
+    tts = CartesiaTTS()
+
+    # TASK A: Listen to the Microphone and send to AssemblyAI
+    async def stt_sender():
         try:
-            url = "https://api.cartesia.ai/tts/bytes"
-            headers = {
-                "Authorization": f"Bearer {settings.CARTESIA_API_KEY}",
-                "Cartesia-Version": "2024-06-10",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "transcript": text,
-                "model_id": "sonic-english", # Sonic is their fastest model
-                "voice": {
-                    "mode": "id",
-                    "id": "6ccbfb76-1fc6-48f7-b71d-91ac6298247b" 
-                },
-                "output_format": {
-                    "container": "mp3",
-                    "sample_rate": 44100
-                }
-            }
+            async for chunk in audio_stream:
+                await stt.send_audio(chunk)
+        finally:
+            await stt.close()
 
-            # We don't use a timeout to prevent closing the connection early
-            response = await client.post(url, headers=headers, json=payload, timeout=None)
-            
-            if response.status_code == 200:
-                return response.content
-            else:
-                print(f"Cartesia Error {response.status_code}: {response.text}")
-                return b""
-        except Exception as e:
-            print(f"Exception in speak: {e}")
-            return b""
+    # TASK B: Listen for synthesized audio from Cartesia and send to Browser
+    async def tts_receiver():
+        async for tts_event in tts.receive_events():
+            await websocket.send_json(event_to_dict(tts_event))
 
-# ... keep your ConnectionManager and get route the same ...
-html = """
-<!DOCTYPE html>
-<html>
-    <head>
-        <title>Audio Chat</title>
-        <style>
-            body { font-family: sans-serif; margin: 20px; line-height: 1.6; }
-            .recording { color: red; font-weight: bold; animation: blink 1s infinite; }
-            @keyframes blink { 50% { opacity: 0; } }
-            #messages { list-style-type: none; padding: 0; }
-            #messages li { background: #f4f4f4; margin: 5px 0; padding: 10px; border-radius: 5px; }
-            button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
-        </style>
-    </head>
-    <body>
-        <h1>Audio WebSocket Chat</h1>
-        <h2>Your ID: <span id="ws-id"></span></h2>
-        
-        <button id="recordBtn">Start Recording</button>
-        <p id="status">Status: Idle</p>
+    # Fire off background tasks
+    asyncio.create_task(stt_sender())
+    asyncio.create_task(tts_receiver())
 
-        <ul id='messages'></ul>
-
-        <script>
-            const client_id = Date.now();
-            document.querySelector("#ws-id").textContent = client_id;
-            
-            // 1. Establish WebSocket
-            const ws = new WebSocket(`ws://localhost:8000/ws/${client_id}`);
-            ws.binaryType = "arraybuffer"; 
-
-            let mediaRecorder;
-            let audioChunks = []; 
-            const recordBtn = document.getElementById("recordBtn");
-            const statusLabel = document.getElementById("status");
-
-            // 2. Handle incoming data from FastAPI
-            ws.onmessage = function(event) {
-    if (event.data instanceof ArrayBuffer) {
-        console.log("Audio bytes received. Size:", event.data.byteLength);
-        
-        // If the byte size is very small (like < 500), it's probably an error message, not audio
-        if (event.data.byteLength < 500) {
-            console.error("Received data is too small to be audio. Check server logs.");
-            return;
-        }
-
-        const blob = new Blob([event.data], { type: 'audio/mpeg' });
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        
-        audio.play().then(() => {
-            console.log("Playback started successfully");
-        }).catch(e => {
-            console.error("Playback failed. This usually happens if you haven't clicked the page yet.", e);
-        });
-    }else {
-                    const messages = document.getElementById('messages');
-                    const message = document.createElement('li');
-                    message.textContent = event.data;
-                    messages.appendChild(message);
-                }
-            };
-
-            // 3. Audio Capture Logic (Record -> Stop -> Send)
-            async function toggleRecording() {
-                if (mediaRecorder && mediaRecorder.state === "recording") {
-                    // STOPPING
-                    mediaRecorder.stop();
-                    recordBtn.textContent = "Start Recording";
-                    statusLabel.textContent = "Status: Processing...";
-                    statusLabel.classList.remove("recording");
-                } else {
-                    // STARTING
-                    try {
-                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                        mediaRecorder = new MediaRecorder(stream);
-                        audioChunks = [];
-
-                        mediaRecorder.ondataavailable = (event) => {
-                            if (event.data.size > 0) {
-                                audioChunks.push(event.data);
-                            }
-                        };
-
-                        mediaRecorder.onstop = () => {
-                            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                            console.log("Sending audio blob, size:", audioBlob.size);
-                            
-                            if (ws.readyState === WebSocket.OPEN) {
-                                ws.send(audioBlob);
-                            }
-                        };
-
-                        mediaRecorder.start(); 
-                        recordBtn.textContent = "Stop & Send";
-                        statusLabel.textContent = "Status: Recording...";
-                        statusLabel.classList.add("recording");
-                    } catch (err) {
-                        console.error("Error accessing microphone:", err);
-                        alert("Could not access microphone.");
-                    }
-                }
-            }
-
-            // Bind the function to the button
-            recordBtn.onclick = toggleRecording;
-
-            ws.onopen = () => console.log("WebSocket connected");
-            ws.onclose = () => {
-                statusLabel.textContent = "Status: Disconnected";
-                recordBtn.disabled = true;
-            };
-        </script>
-    </body>
-</html>
-"""
-
-@app.get("/")
-async def get():
-    return HTMLResponse(html)
-
-@app.websocket("/ws/{client_id}")
-async def websocket_endpoint(websocket: WebSocket, client_id: int):
-    await manager.connect(websocket)
+    # MAIN LOOP: Process Transcripts -> LLM -> TTS Trigger
     try:
-        while True:
-            # 1. Receive data
-            data = await websocket.receive_bytes()
+        async for stt_event in stt.receive_events():
+            # Send ALL stt events (chunks + output) to frontend
+            await websocket.send_json(event_to_dict(stt_event))
 
-            # 2. Transcribe
-            text = await transcribe_audio(data)
-            
-            if text.strip():
-                # 3. Parallel Execution: Start TTS and Broadcast simultaneously
-                # This saves the time it takes for the broadcast to finish
-                audio_task = asyncio.create_task(speak_async(text))
+            if isinstance(stt_event, STTOutputEvent):
+                print(f"DEBUG: Processing Transcript: {stt_event.transcript}")
                 
-                # Update the UI immediately with text
-                await manager.send_personal_message(f"You said: {text}", websocket)
-                
-                # Wait for audio to be ready
-                audio_bytes = await audio_task
-                
-                if audio_bytes:
-                    await websocket.send_bytes(audio_bytes)
-                
-                # Broadcast in the background to not slow down the current user
-                asyncio.create_task(manager.broadcast(f"Client #{client_id} says: {text}"))
+                text_buffer = []
+                async for agent_event in interview_brain(stt_event.transcript):
+                    await websocket.send_json(event_to_dict(agent_event))
+                    
+                    if isinstance(agent_event, AgentChunkEvent):
+                        text_buffer.append(agent_event.text)
+                    
+                    if isinstance(agent_event, AgentEndEvent):
+                        # Trigger TTS - Task B will catch the resulting audio
+                        await tts.send_text("".join(text_buffer))
+    finally:
+        await tts.close()
 
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-        await manager.broadcast(f"Client #{client_id} left the chat")
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    
+    async def audio_iter():
+        try:
+            while True:
+                data = await websocket.receive_bytes()
+                yield data
+        except Exception:
+            print("Client disconnected")
+
+    await run_pipeline(audio_iter(), websocket)
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
