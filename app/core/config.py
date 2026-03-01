@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     GOOGLE_AUTH_URL: str
     GOOGLE_TOKEN_URL: str
     GOOGLE_REDIRECT_URI:str
+    ASSEMBLYAI_API_KEY: str
 
     class Config:
         env_file = ".env"
