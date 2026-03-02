@@ -113,6 +113,7 @@ class AssemblyAISTT:
             {
                 "sample_rate": self.sample_rate,
                 "format_turns": str(self.format_turns).lower(),
+                "end_at_ungap_ms": 1000,
             }
         )
         url = f"wss://streaming.assemblyai.com/v3/ws?{params}"
