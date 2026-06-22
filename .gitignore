@@ -6,6 +6,14 @@
 # Allow .env.example — it has no real keys, just placeholders for reference
 !.env.example
 
+# Node modules
+node_modules/
+node_modules/
+.next/
+.env
+.env.local
+*.tsbuildinfo
+
 # Python virtual environment
 venv/
 .venv/
