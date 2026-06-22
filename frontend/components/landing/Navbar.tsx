@@ -1,0 +1,76 @@
+'use client'
+import Link from 'next/link'
+import { SignedIn, SignedOut, UserButton } from '@clerk/nextjs'
+import { useState } from 'react'
+
+export default function Navbar() {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <nav className="fixed top-0 inset-x-0 z-50 border-b border-white/5 backdrop-blur-xl bg-[#07090f]/80">
+      <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+
+        {/* Logo */}
+        <Link href="/" className="flex items-center gap-2.5 shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <circle cx="8" cy="8" r="2.5" fill="white" />
+              <path d="M8 2v1.5M8 12.5V14M2 8h1.5M12.5 8H14M3.76 3.76l1.06 1.06M11.18 11.18l1.06 1.06M3.76 12.24l1.06-1.06M11.18 4.82l1.06-1.06" stroke="white" strokeWidth="1.4" strokeLinecap="round"/>
+            </svg>
+          </div>
+          <span className="text-white font-bold text-lg tracking-tight">PrepAI</span>
+        </Link>
+
+        {/* Desktop links */}
+        <div className="hidden md:flex items-center gap-8">
+          {[['#features', 'Features'], ['#how-it-works', 'How It Works'], ['#pricing', 'Pricing']].map(([href, label]) => (
+            <a key={href} href={href} className="text-white/50 hover:text-white text-sm font-medium transition-colors duration-200">
+              {label}
+            </a>
+          ))}
+        </div>
+
+        {/* Auth */}
+        <div className="flex items-center gap-3">
+          <SignedOut>
+            <Link href="/sign-in" className="hidden md:block text-white/60 hover:text-white text-sm font-medium transition-colors px-3 py-1.5">
+              Sign In
+            </Link>
+            <Link href="/sign-up" className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity shadow-lg shadow-indigo-500/25">
+              Get Started
+            </Link>
+          </SignedOut>
+          <SignedIn>
+            <Link href="/interview" className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity shadow-lg shadow-indigo-500/25">
+              Go to Interview
+            </Link>
+            <UserButton afterSignOutUrl="/" />
+          </SignedIn>
+
+          {/* Mobile hamburger */}
+          <button onClick={() => setOpen(!open)} className="md:hidden text-white/60 hover:text-white p-1">
+            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              {open
+                ? <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                : <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />}
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile menu */}
+      {open && (
+        <div className="md:hidden border-t border-white/5 bg-[#07090f] px-6 py-4 flex flex-col gap-4">
+          {[['#features', 'Features'], ['#how-it-works', 'How It Works'], ['#pricing', 'Pricing']].map(([href, label]) => (
+            <a key={href} href={href} onClick={() => setOpen(false)} className="text-white/60 hover:text-white text-sm font-medium transition-colors">
+              {label}
+            </a>
+          ))}
+          <SignedOut>
+            <Link href="/sign-in" className="text-white/60 hover:text-white text-sm font-medium">Sign In</Link>
+          </SignedOut>
+        </div>
+      )}
+    </nav>
+  )
+}
