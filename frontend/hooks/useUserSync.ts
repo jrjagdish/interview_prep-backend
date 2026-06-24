@@ -1,29 +1,40 @@
 'use client'
 import { useEffect, useRef } from 'react'
-import { useUser } from '@clerk/nextjs'
+import { useAuth } from '@clerk/nextjs'
 
 export function useUserSync() {
-  const { user, isLoaded } = useUser()
+  const { getToken, userId } = useAuth()
   const synced = useRef(false)
 
   useEffect(() => {
-    if (!isLoaded || !user || synced.current) return
-    synced.current = true
+    // If Clerk isn't initialized, no user ID exists, or we already synced, jump out
+    if (!getToken || !userId || synced.current) return
 
-    const payload = {
-      clerkId: user.id,
-      email: user.primaryEmailAddress?.emailAddress ?? '',
-      firstName: user.firstName ?? '',
-      lastName: user.lastName ?? '',
-      imageUrl: user.imageUrl,
-      provider: user.primaryEmailAddress?.verification?.strategy ?? 'email',
-      createdAt: user.createdAt,
+    // 1. Create a quick internal async function inside the effect
+    const syncUser = async () => {
+      try {
+        synced.current = true // Set ref immediately to prevent race conditions from double execution
+
+        // 2. Await the token safely
+        const token = await getToken();
+
+        // 3. Fire the request with the actual string token
+        const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+        
+        await fetch(`${baseUrl}/api/users/sync`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`, 
+            'Content-Type': 'application/json',
+          },
+        })
+      } catch (err) {
+        console.error('[useUserSync] failed:', err)
+        synced.current = false // Reset on true network failure so it can retry if necessary
+      }
     }
 
-    fetch(`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'}/api/users/sync`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }).catch((err) => console.error('[useUserSync] failed:', err))
-  }, [isLoaded, user])
+    // 4. Trigger the operation
+    syncUser()
+  }, [getToken, userId])
 }

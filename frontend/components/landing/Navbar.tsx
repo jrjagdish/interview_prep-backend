@@ -1,10 +1,11 @@
 'use client'
 import Link from 'next/link'
-import { SignedIn, SignedOut, UserButton } from '@clerk/nextjs'
+import { UserButton, useUser } from '@clerk/nextjs'
 import { useState } from 'react'
 
 export default function Navbar() {
   const [open, setOpen] = useState(false)
+  const { isSignedIn } = useUser()
 
   return (
     <nav className="fixed top-0 inset-x-0 z-50 border-b border-white/5 backdrop-blur-xl bg-[#07090f]/80">
@@ -32,20 +33,23 @@ export default function Navbar() {
 
         {/* Auth */}
         <div className="flex items-center gap-3">
-          <SignedOut>
-            <Link href="/sign-in" className="hidden md:block text-white/60 hover:text-white text-sm font-medium transition-colors px-3 py-1.5">
-              Sign In
-            </Link>
-            <Link href="/sign-up" className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity shadow-lg shadow-indigo-500/25">
-              Get Started
-            </Link>
-          </SignedOut>
-          <SignedIn>
-            <Link href="/interview" className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity shadow-lg shadow-indigo-500/25">
-              Go to Interview
-            </Link>
-            <UserButton afterSignOutUrl="/" />
-          </SignedIn>
+          {!isSignedIn ? (
+            <>
+              <Link href="/sign-in" className="hidden md:block text-white/60 hover:text-white text-sm font-medium transition-colors px-3 py-1.5">
+                Sign In
+              </Link>
+              <Link href="/sign-up" className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity shadow-lg shadow-indigo-500/25">
+                Get Started
+              </Link>
+            </>
+          ) : (
+            <>
+              <Link href="/interview" className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity shadow-lg shadow-indigo-500/25">
+                Go to Interview
+              </Link>
+              <UserButton />
+            </>
+          )}
 
           {/* Mobile hamburger */}
           <button onClick={() => setOpen(!open)} className="md:hidden text-white/60 hover:text-white p-1">
@@ -66,9 +70,9 @@ export default function Navbar() {
               {label}
             </a>
           ))}
-          <SignedOut>
+          {!isSignedIn && (
             <Link href="/sign-in" className="text-white/60 hover:text-white text-sm font-medium">Sign In</Link>
-          </SignedOut>
+          )}
         </div>
       )}
     </nav>
