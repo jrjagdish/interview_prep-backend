@@ -11,6 +11,7 @@ import os
 from deepgram import AsyncDeepgramClient
 from deepgram.listen import ListenV1Results
 from cartesia import AsyncCartesia
+from routes import router
 
 deepgram_api_key = os.getenv("DEEPGRAM_API_KEY")
 groq_api_key = os.getenv("GROQ_API_KEY")
@@ -34,7 +35,7 @@ app.add_middleware(
 
 
 
-
+app.include_router(router=router)
 
 @app.get("/")
 async def get():
