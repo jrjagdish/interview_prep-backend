@@ -1,6 +1,7 @@
 import type { Config } from 'tailwindcss'
 
 const config: Config = {
+  darkMode: 'class',
   content: [
     './pages/**/*.{js,ts,jsx,tsx,mdx}',
     './components/**/*.{js,ts,jsx,tsx,mdx}',
@@ -9,6 +10,12 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      opacity: {
+        3: '0.03',
+        8: '0.08',
+        12: '0.12',
+        15: '0.15',
+      },
       animation: {
         'wave-ring': 'wave-ring 2s ease-out infinite',
         'wave-ring-2': 'wave-ring 2s ease-out 0.4s infinite',
