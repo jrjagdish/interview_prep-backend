@@ -4,6 +4,8 @@ from fastapi import FastAPI, Depends, HTTPException, status, APIRouter
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 import requests
+import sentry_sdk
+
 
 load_dotenv()
 
@@ -40,11 +42,11 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         return payload  
         
     except jwt.ExpiredSignatureError:
-        print("❌ JWT Error: Token has expired!")
+        sentry_sdk.logger.error("JWT Error: Token has expired!")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has expired")
     except Exception as e:
-        # 👇 ADD THIS LINE to see the exact error message in your FastAPI console terminal
-        print(f"❌ JWT Verification Failed Because: {str(e)}") 
+        
+        sentry_sdk.logger.error(f"JWT Verification Failed Because: {str(e)}") 
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Invalid token: {str(e)}")
 
 
@@ -56,12 +58,12 @@ async def secure_data(current_user: dict = Depends(get_current_user)):
     headers = {"Authorization": f"Bearer {CLERK_SECRET_KEY}"}
     clerk_response = requests.get(f"https://api.clerk.com/v1/users/{clerk_id}", headers=headers)
     if clerk_response.status_code != 200:
-        print(f"❌ Clerk API Call failed: {clerk_response.status_code} - {clerk_response.text}")
+        print(f"Clerk API Call failed: {clerk_response.status_code} - {clerk_response.text}")
         raise HTTPException(status_code=400,detail="failed to fetch data from clerk")
     
     user_data = clerk_response.json()
 
-    # ❌ FIX: Swapped inner double quotes to single quotes to prevent breaking the f-string literal
+    
     print(f"got user data: {user_data}")
     
     return {
