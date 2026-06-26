@@ -1,8 +1,8 @@
-import { ClerkProvider } from '@clerk/nextjs'
 import type { Metadata } from 'next'
 // @ts-ignore: side-effect import of global CSS without type declarations
 import './globals.css'
 import { ThemeProvider } from '@/components/ThemeProvider'
+import { AuthProvider } from '@/context/AuthContext'
 
 export const metadata: Metadata = {
   title: 'PrepAI — AI Interview Practice',
@@ -11,14 +11,14 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <ClerkProvider>
-      <html lang="en" className="dark">
-        <body>
+    <html lang="en" className="dark">
+      <body>
+        <AuthProvider>
           <ThemeProvider>
             {children}
           </ThemeProvider>
-        </body>
-      </html>
-    </ClerkProvider>
+        </AuthProvider>
+      </body>
+    </html>
   )
 }

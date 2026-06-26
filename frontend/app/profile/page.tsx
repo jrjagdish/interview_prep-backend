@@ -1,18 +1,15 @@
 'use client'
 import Link from 'next/link'
-import { useUser, UserButton } from '@clerk/nextjs'
+import { useAuth } from '@/context/AuthContext'
+import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { ThemeToggle } from '@/components/ThemeToggle'
 
-export default function ProfilePage() {
-  const { user, isLoaded } = useUser()
+function ProfileContent() {
+  const { user, logout } = useAuth()
 
-  const displayName =
-    [user?.firstName, user?.lastName].filter(Boolean).join(' ') ||
-    user?.primaryEmailAddress?.emailAddress?.split('@')[0] ||
-    'User'
-
-  const email = user?.primaryEmailAddress?.emailAddress ?? '—'
-  const initials = displayName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()
+  const displayName = user?.username ?? user?.email?.split('@')[0] ?? 'User'
+  const email = user?.email ?? '—'
+  const initials = displayName.slice(0, 2).toUpperCase()
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-[#07090f] dark:text-white">
@@ -22,7 +19,6 @@ export default function ProfilePage() {
         <div className="absolute -bottom-40 -right-40 w-[500px] h-[500px] rounded-full bg-violet-500/5 blur-[120px] dark:bg-violet-700/15" />
       </div>
 
-      {/* Header */}
       <header className="relative z-10 border-b backdrop-blur-xl border-slate-200 bg-white/80 dark:border-white/5 dark:bg-[#07090f]/80">
         <div className="max-w-3xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -35,21 +31,25 @@ export default function ProfilePage() {
           </div>
           <div className="flex items-center gap-3">
             <ThemeToggle />
-            <UserButton />
+            <button
+              onClick={logout}
+              className="text-sm text-slate-500 hover:text-slate-900 dark:text-white/40 dark:hover:text-white transition-colors"
+            >
+              Sign out
+            </button>
           </div>
         </div>
       </header>
 
       <main className="relative z-10 max-w-3xl mx-auto px-6 py-10 flex flex-col gap-8">
 
-        {/* Avatar + name */}
         <div className="flex items-center gap-6 p-6 rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-white/8 dark:bg-white/3 dark:shadow-none">
           <div className="w-20 h-20 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white text-2xl font-bold shadow-lg shadow-indigo-500/30 shrink-0">
-            {isLoaded ? initials : '?'}
+            {initials}
           </div>
           <div className="flex-1 min-w-0">
-            <h1 className="text-xl font-bold text-slate-900 dark:text-white truncate">{isLoaded ? displayName : '...'}</h1>
-            <p className="text-slate-500 text-sm mt-0.5 dark:text-white/40 truncate">{isLoaded ? email : '...'}</p>
+            <h1 className="text-xl font-bold text-slate-900 dark:text-white truncate">{displayName}</h1>
+            <p className="text-slate-500 text-sm mt-0.5 dark:text-white/40 truncate">{email}</p>
             <span className="inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full bg-slate-100 border border-slate-200 text-slate-500 text-xs font-medium dark:bg-white/5 dark:border-white/10 dark:text-white/40">
               <span className="w-1.5 h-1.5 rounded-full bg-slate-400 dark:bg-white/30" />
               Free Plan
@@ -57,7 +57,6 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* Stats */}
         <div>
           <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-4 dark:text-white/40">Stats</h2>
           <div className="grid grid-cols-3 gap-4">
@@ -75,15 +74,14 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* Account info */}
         <div>
           <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-4 dark:text-white/40">Account</h2>
           <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden dark:border-white/8 dark:bg-white/3">
             {[
-              { label: 'Full Name', value: isLoaded ? displayName : '...' },
-              { label: 'Email', value: isLoaded ? email : '...' },
-              { label: 'Member Since', value: isLoaded && user?.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : '...' },
-              { label: 'Auth Provider', value: isLoaded ? (user?.externalAccounts?.[0]?.provider ?? 'Email') : '...' },
+              { label: 'Username', value: displayName },
+              { label: 'Email', value: email },
+              { label: 'Email Verified', value: user?.is_verified ? 'Yes' : 'No' },
+              { label: 'Auth Provider', value: 'Email & Password' },
             ].map(({ label, value }, i, arr) => (
               <div key={label} className={`flex items-center justify-between px-6 py-4 ${i < arr.length - 1 ? 'border-b border-slate-100 dark:border-white/5' : ''}`}>
                 <span className="text-slate-500 text-sm dark:text-white/40">{label}</span>
@@ -93,7 +91,6 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* Plan */}
         <div>
           <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-4 dark:text-white/40">Plan</h2>
           <div className="rounded-2xl border p-6 flex items-center justify-between border-slate-200 bg-white shadow-sm dark:border-white/8 dark:bg-white/3 dark:shadow-none">
@@ -110,7 +107,6 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* Resume upload (placeholder) */}
         <div>
           <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-4 dark:text-white/40">Resume</h2>
           <div className="rounded-2xl border border-dashed p-8 flex flex-col items-center gap-3 border-slate-200 bg-white dark:border-white/10 dark:bg-white/3">
@@ -128,5 +124,13 @@ export default function ProfilePage() {
 
       </main>
     </div>
+  )
+}
+
+export default function ProfilePage() {
+  return (
+    <ProtectedRoute>
+      <ProfileContent />
+    </ProtectedRoute>
   )
 }

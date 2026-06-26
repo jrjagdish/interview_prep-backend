@@ -12,6 +12,15 @@ from deepgram import AsyncDeepgramClient
 from deepgram.listen import ListenV1Results
 from cartesia import AsyncCartesia
 from routes import router
+import sentry_sdk
+
+
+sentry_sdk.init(
+    dsn=os.getenv("SENTRY_URL"),
+    send_default_pii=True,
+    # Enable sending logs to Sentry
+    enable_logs=True,
+)
 
 deepgram_api_key = os.getenv("DEEPGRAM_API_KEY")
 groq_api_key = os.getenv("GROQ_API_KEY")

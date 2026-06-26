@@ -1,17 +1,13 @@
 'use client'
 import Link from 'next/link'
-import { useUser, UserButton } from '@clerk/nextjs'
-import { useUserSync } from '@/hooks/useUserSync'
+import { useAuth } from '@/context/AuthContext'
+import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { ThemeToggle } from '@/components/ThemeToggle'
 
-export default function DashboardPage() {
-  useUserSync()
-  const { user } = useUser()
+function DashboardContent() {
+  const { user, logout } = useAuth()
 
-  const displayName =
-    user?.firstName ??
-    user?.primaryEmailAddress?.emailAddress?.split('@')[0] ??
-    'there'
+  const displayName = user?.username ?? user?.email?.split('@')[0] ?? 'there'
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-[#07090f] dark:text-white">
@@ -21,7 +17,6 @@ export default function DashboardPage() {
         <div className="absolute -bottom-40 -right-40 w-[500px] h-[500px] rounded-full bg-violet-500/5 blur-[120px] dark:bg-violet-700/15" />
       </div>
 
-      {/* Header */}
       <header className="relative z-10 border-b backdrop-blur-xl border-slate-200 bg-white/80 dark:border-white/5 dark:bg-[#07090f]/80">
         <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2.5">
@@ -35,20 +30,21 @@ export default function DashboardPage() {
           </Link>
           <div className="flex items-center gap-3">
             <ThemeToggle />
-            <Link
-              href="/profile"
-              className="text-sm text-slate-500 hover:text-slate-900 dark:text-white/40 dark:hover:text-white transition-colors"
-            >
+            <Link href="/profile" className="text-sm text-slate-500 hover:text-slate-900 dark:text-white/40 dark:hover:text-white transition-colors">
               Profile
             </Link>
-            <UserButton />
+            <button
+              onClick={logout}
+              className="text-sm text-slate-500 hover:text-slate-900 dark:text-white/40 dark:hover:text-white transition-colors"
+            >
+              Sign out
+            </button>
           </div>
         </div>
       </header>
 
       <main className="relative z-10 max-w-5xl mx-auto px-6 py-14 flex flex-col gap-12">
 
-        {/* Welcome */}
         <div>
           <p className="text-sm font-medium uppercase tracking-widest mb-2 text-slate-400 dark:text-white/40">Dashboard</p>
           <h1 className="text-3xl font-bold text-slate-900 dark:text-white">
@@ -58,7 +54,6 @@ export default function DashboardPage() {
           <p className="mt-2 text-sm text-slate-400 dark:text-white/40">Ready to sharpen your interview skills?</p>
         </div>
 
-        {/* Start Interview CTA */}
         <div className="rounded-2xl border border-indigo-500/20 bg-gradient-to-br from-indigo-500/10 to-violet-600/10 p-8 flex flex-col md:flex-row items-center justify-between gap-6">
           <div>
             <h2 className="text-xl font-semibold mb-1 text-slate-900 dark:text-white">Start a new interview</h2>
@@ -74,7 +69,6 @@ export default function DashboardPage() {
           </Link>
         </div>
 
-        {/* Stats */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {[
             { label: 'Interviews Done', value: '0', icon: '🎙️' },
@@ -91,7 +85,6 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        {/* Quick links */}
         <div className="grid sm:grid-cols-2 gap-4">
           <Link href="/profile" className="flex items-center gap-4 p-5 rounded-xl border shadow-sm transition-all border-slate-200 bg-white hover:shadow-md hover:border-slate-300 dark:border-white/8 dark:bg-white/3 dark:shadow-none dark:hover:bg-white/5">
             <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center dark:bg-indigo-500/10">
@@ -118,7 +111,6 @@ export default function DashboardPage() {
           </Link>
         </div>
 
-        {/* Recent interviews placeholder */}
         <div>
           <h3 className="text-sm font-semibold uppercase tracking-widest mb-4 text-slate-400 dark:text-white/60">Recent Interviews</h3>
           <div className="rounded-xl border shadow-sm px-6 py-10 flex flex-col items-center justify-center text-center border-slate-200 bg-white dark:border-white/8 dark:bg-white/3 dark:shadow-none">
@@ -129,5 +121,13 @@ export default function DashboardPage() {
 
       </main>
     </div>
+  )
+}
+
+export default function DashboardPage() {
+  return (
+    <ProtectedRoute>
+      <DashboardContent />
+    </ProtectedRoute>
   )
 }

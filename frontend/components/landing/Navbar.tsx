@@ -1,12 +1,13 @@
 'use client'
 import Link from 'next/link'
-import { UserButton, useUser } from '@clerk/nextjs'
 import { useState } from 'react'
+import { useAuth } from '@/context/AuthContext'
 import { ThemeToggle } from '@/components/ThemeToggle'
 
 export default function Navbar() {
   const [open, setOpen] = useState(false)
-  const { isSignedIn } = useUser()
+  const { user, logout } = useAuth()
+  const isSignedIn = !!user
 
   return (
     <nav className="fixed top-0 inset-x-0 z-50 border-b backdrop-blur-xl border-slate-200 bg-white/80 dark:border-white/5 dark:bg-[#07090f]/80">
@@ -47,7 +48,12 @@ export default function Navbar() {
               <Link href="/dashboard" className="px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold hover:opacity-90 transition-opacity shadow-lg shadow-indigo-500/25">
                 Dashboard
               </Link>
-              <UserButton />
+              <button
+                onClick={logout}
+                className="text-sm font-medium text-slate-500 hover:text-slate-900 dark:text-white/60 dark:hover:text-white transition-colors"
+              >
+                Sign out
+              </button>
             </>
           )}
 
