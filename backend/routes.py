@@ -158,6 +158,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
 
 @router.get("/api/users/me")
 def me(current_user: User = Depends(get_current_user)):
+    profile = current_user.profile
     return {
         "id": str(current_user.id),
         "email": current_user.email,
@@ -165,6 +166,7 @@ def me(current_user: User = Depends(get_current_user)):
         "image_url": current_user.image_url,
         "is_verified": current_user.is_verified,
         "created_at": current_user.created_at,
+        "pdf_url" : profile.resume_pdf_url if profile else None
     }
 
 
