@@ -2,16 +2,23 @@ from dotenv import load_dotenv
 load_dotenv()  # must run before any other imports that read os.getenv
 
 import asyncio
+import json
+import uuid
 from contextlib import asynccontextmanager
-from fastapi import WebSocket, FastAPI
+from fastapi import WebSocket, FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from groq import AsyncGroq
 import os
+import jwt
 from deepgram import AsyncDeepgramClient
 from deepgram.listen import ListenV1Results
 from cartesia import AsyncCartesia
-from routes import router
+from sqlalchemy.orm import Session
+from routes import router, JWT_SECRET, JWT_ALGORITHM
+from db import get_db
+from models import Interview, Profile, utcnow
+import interview_session
 import sentry_sdk
 
 
@@ -51,9 +58,90 @@ async def get():
     return {"working good"}
 
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def _send_ctrl(websocket: WebSocket, payload: dict) -> None:
+    try:
+        await websocket.send_text(f"ctrl:{json.dumps(payload)}")
+    except Exception:
+        pass
+
+
+async def _end_interview(db: Session, interview_id: str) -> None:
+    messages = await interview_session.get_messages(interview_id)
+    interview = db.query(Interview).filter(Interview.id == interview_id).first()
+    if interview is not None and interview.status == "active":
+        interview.conversation_data = messages
+        interview.status = "completed"
+        interview.concluded_at = utcnow()
+        db.commit()
+    await interview_session.end_session(interview_id)
+
+
+@app.websocket("/ws/{interview_id}")
+async def websocket_endpoint(
+    websocket: WebSocket, interview_id: str, db: Session = Depends(get_db)
+):
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4401)
+        return
+
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise ValueError("missing sub")
+    except Exception:
+        await websocket.close(code=4401)
+        return
+
+    try:
+        uuid.UUID(interview_id)
+    except ValueError:
+        await websocket.close(code=4400)
+        return
+
+    interview = (
+        db.query(Interview)
+        .join(Profile, Interview.profile_id == Profile.id)
+        .filter(Interview.id == interview_id, Profile.user_id == user_id)
+        .first()
+    )
+    if interview is None or not await interview_session.session_exists(interview_id):
+        await websocket.close(code=4404)
+        return
+    if interview.status != "active":
+        await websocket.close(code=4409)
+        return
+
     await websocket.accept()
+
+    remaining = await interview_session.get_remaining_seconds(interview_id)
+    if remaining <= 0:
+        await _send_ctrl(websocket, {"type": "time_up"})
+        await _end_interview(db, interview_id)
+        await websocket.close()
+        return
+
+    history = await interview_session.get_messages(interview_id)
+    if history:
+        await _send_ctrl(websocket, {"type": "history", "messages": history})
+
+    ended_event = asyncio.Event()
+
+    async def watchdog():
+        await asyncio.sleep(await interview_session.get_remaining_seconds(interview_id))
+        if ended_event.is_set():
+            return
+        ended_event.set()
+        await _send_ctrl(websocket, {"type": "time_up"})
+        await _end_interview(db, interview_id)
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+    watchdog_task = asyncio.create_task(watchdog())
+
     try:
         # BARGE-IN: asyncio.Event shared between the receive loop and the TTS task.
         # The receive loop sets it when "interrupt" arrives; the TTS task checks it
@@ -69,6 +157,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
             async def listen_for_transcripts():
                 async for message in deepgram_socket:
+                    if ended_event.is_set():
+                        break
                     if isinstance(message, ListenV1Results):
                         transcript = message.channel.alternatives[0].transcript
                         if transcript:
@@ -78,16 +168,68 @@ async def websocket_endpoint(websocket: WebSocket):
 
                             # Step 1: Show transcript in browser.
                             await websocket.send_text(transcript)
+                            await interview_session.append_message(
+                                interview_id, "user", transcript
+                            )
+
+                            remaining = await interview_session.get_remaining_seconds(
+                                interview_id
+                            )
+                            if remaining <= 0:
+                                ended_event.set()
+                                await _send_ctrl(websocket, {"type": "time_up"})
+                                await _end_interview(db, interview_id)
+                                try:
+                                    await websocket.close()
+                                except Exception:
+                                    pass
+                                break
+
+                            is_final_turn = (
+                                remaining <= interview_session.WARNING_THRESHOLD_SECONDS
+                            )
+                            just_warned = (
+                                await interview_session.mark_warned(interview_id)
+                                if is_final_turn
+                                else False
+                            )
+
+                            job_role = await interview_session.get_job_role(
+                                interview_id
+                            )
+                            system_content = (
+                                "You are conducting a live job interview for the role of "
+                                f"{job_role or 'the position'}. Ask one focused question at a "
+                                "time, listen to the candidate's answer, and follow up "
+                                "naturally. Reply in plain text, no markdown."
+                            )
+                            if is_final_turn:
+                                system_content += (
+                                    " Only about a minute remains in this interview. "
+                                    "Briefly acknowledge the candidate's last answer, then ask "
+                                    "exactly ONE final concluding question and tell them this "
+                                    "is the last question of the interview."
+                                )
+
+                            turn_history = await interview_session.get_messages(
+                                interview_id
+                            )
+                            groq_messages = [
+                                {"role": "system", "content": system_content}
+                            ]
+                            groq_messages.extend(
+                                {"role": m["role"], "content": m["content"]}
+                                for m in turn_history
+                            )
+
+                            if just_warned:
+                                await _send_ctrl(
+                                    websocket, {"type": "final_question"}
+                                )
 
                             # Step 2: Stream Groq AI reply word by word.
                             stream = await client.chat.completions.create(
-                                messages=[
-                                    {
-                                        "role": "system",
-                                        "content": "You are a helpful assistant. Reply in plain text, no markdown.",
-                                    },
-                                    {"role": "user", "content": transcript},
-                                ],
+                                messages=groq_messages,
                                 model="llama-3.3-70b-versatile",
                                 temperature=0.5,
                                 stream=True,
@@ -102,6 +244,10 @@ async def websocket_endpoint(websocket: WebSocket):
 
                             if not full_response:
                                 continue
+
+                            await interview_session.append_message(
+                                interview_id, "assistant", full_response
+                            )
 
                             # Step 3: Call Cartesia TTS with the full response.
                             async with Cs_client.tts.websocket_connect() as tts_connection:
@@ -157,13 +303,34 @@ async def websocket_endpoint(websocket: WebSocket):
                                     await websocket.send_text("stop_audio")
                                     interrupt_event.clear()
 
+                            if ended_event.is_set():
+                                try:
+                                    await websocket.close()
+                                except Exception:
+                                    pass
+                                break
+
             listener_task = asyncio.create_task(listen_for_transcripts())
 
             try:
-                while True:
+                while not ended_event.is_set():
                     # BARGE-IN: Switch from receive_bytes() to receive() so we can handle
                     # both binary audio frames and the text "interrupt" signal on one socket.
-                    message = await websocket.receive()
+                    # Raced against ended_event so a watchdog-triggered timeout wakes this
+                    # loop up immediately instead of waiting on a receive() that may never
+                    # arrive if the candidate has gone quiet.
+                    receive_task = asyncio.create_task(websocket.receive())
+                    ended_task = asyncio.create_task(ended_event.wait())
+                    done, pending = await asyncio.wait(
+                        [receive_task, ended_task], return_when=asyncio.FIRST_COMPLETED
+                    )
+                    for task in pending:
+                        task.cancel()
+
+                    if ended_task in done:
+                        break
+
+                    message = receive_task.result()
 
                     if "bytes" in message and message["bytes"]:
                         # Normal audio chunk from the browser mic — forward to Deepgram.
@@ -177,4 +344,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 listener_task.cancel()
 
     except Exception as e:
+        # Network drop or client-initiated close lands here. The interview is left
+        # "active" in Postgres and its Redis session keeps its TTL, so the candidate
+        # can reconnect to the same interview_id and resume with full history intact.
         print(f"error : {e}")
+    finally:
+        watchdog_task.cancel()

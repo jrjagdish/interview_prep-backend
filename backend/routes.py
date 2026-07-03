@@ -11,8 +11,9 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 import cloudinary.uploader
 from db import get_db
-from models import Profile, User
+from models import Interview, Profile, User
 import config
+import interview_session
 
 router = APIRouter()
 security = HTTPBearer()
@@ -45,6 +46,10 @@ class AuthResponse(BaseModel):
     user_id: str
     email: str
     username: str | None
+
+
+class StartInterviewRequest(BaseModel):
+    job_role: str | None = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -192,3 +197,37 @@ def upload_file(
     db.refresh(profile)
 
     return {"Message": "Successful"}
+
+
+@router.post("/api/interviews/start")
+async def start_interview(
+    body: StartInterviewRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    profile = current_user.profile
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    if not profile.is_pro and profile.available_interviews <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="No interview credits remaining",
+        )
+
+    interview = Interview(profile_id=profile.id, job_role=body.job_role, status="active")
+    db.add(interview)
+
+    if not profile.is_pro:
+        profile.available_interviews -= 1
+    profile.interview_attempts += 1
+
+    db.commit()
+    db.refresh(interview)
+
+    await interview_session.create_session(str(interview.id), body.job_role)
+
+    return {
+        "interview_id": str(interview.id),
+        "duration_seconds": interview_session.INTERVIEW_DURATION_SECONDS,
+    }

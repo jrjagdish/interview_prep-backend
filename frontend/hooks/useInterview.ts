@@ -1,20 +1,35 @@
 'use client'
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useAuth } from '@/context/AuthContext'
+import { apiFetch } from '@/lib/api'
 
-export type Status = 'idle' | 'connected' | 'disconnected' | 'error'
+export type Status = 'idle' | 'connected' | 'disconnected' | 'error' | 'ended'
 
-export function useInterview() {
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+const WS_URL = API_URL.replace(/^http/, 'ws')
+
+interface StartInterviewResponse {
+  interview_id: string
+  duration_seconds: number
+}
+
+export function useInterview(jobRole?: string) {
+  const { token } = useAuth()
   const [status, setStatus] = useState<Status>('idle')
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [transcript, setTranscript] = useState('')
   const [aiResponse, setAiResponse] = useState('')
   // true while Cartesia TTS audio is queued or playing — drives the wave animation
   const [isBotSpeaking, setIsBotSpeaking] = useState(false)
+  const [timeRemaining, setTimeRemaining] = useState<number | null>(null)
+  const [isFinalQuestion, setIsFinalQuestion] = useState(false)
 
   const audioCtxRef = useRef<AudioContext | null>(null)
   const audioQueueRef = useRef<ArrayBuffer[]>([])
   const isPlayingRef = useRef(false)
   const currentSourceRef = useRef<AudioBufferSourceNode | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // ── barge-in state ──────────────────────────────────────────────
   const VOLUME_THRESHOLD = 0.04
@@ -68,14 +83,68 @@ export function useInterview() {
     source.start()
   }, [updateSpeakingState])
 
+  const stopCountdown = useCallback(() => {
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current)
+      countdownRef.current = null
+    }
+  }, [])
+
+  const handleCtrlMessage = useCallback((raw: string) => {
+    let payload: { type: string; messages?: { role: string; content: string }[] }
+    try {
+      payload = JSON.parse(raw)
+    } catch {
+      return
+    }
+
+    if (payload.type === 'time_up') {
+      setStatus('ended')
+      setIsFinalQuestion(false)
+      stopCountdown()
+      socketRef.current?.close()
+    } else if (payload.type === 'final_question') {
+      setIsFinalQuestion(true)
+    } else if (payload.type === 'history' && payload.messages) {
+      const lastUser = [...payload.messages].reverse().find((m) => m.role === 'user')
+      const lastAi = [...payload.messages].reverse().find((m) => m.role === 'assistant')
+      if (lastUser) setTranscript(lastUser.content)
+      if (lastAi) setAiResponse(lastAi.content)
+    }
+  }, [stopCountdown])
+
   // ── main effect: mic + websocket setup ─────────────────────────
   useEffect(() => {
+    if (!token) return
+
     let mediaRecorder: MediaRecorder
     let analyser: AnalyserNode
     let intervalId: ReturnType<typeof setInterval>
     let socket: WebSocket
+    let cancelled = false
+    const authToken = token
 
     async function init() {
+      let startData: StartInterviewResponse
+      try {
+        startData = await apiFetch<StartInterviewResponse>(
+          '/api/interviews/start',
+          authToken,
+          { method: 'POST', body: JSON.stringify({ job_role: jobRole ?? null }) }
+        )
+      } catch (err) {
+        if (cancelled) return
+        setErrorMessage(err instanceof Error ? err.message : 'Could not start interview')
+        setStatus('error')
+        return
+      }
+      if (cancelled) return
+
+      setTimeRemaining(startData.duration_seconds)
+      countdownRef.current = setInterval(() => {
+        setTimeRemaining((prev) => (prev === null ? null : Math.max(0, prev - 1)))
+      }, 1000)
+
       // AudioContext must be created after a user gesture; creating it here is
       // fine because the hook mounts only after the user visits the page.
       audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
@@ -100,7 +169,9 @@ export function useInterview() {
       micSrc.connect(analyser) // NOT connected to destination — avoids echo
 
       // ── WebSocket ─────────────────────────────────────────────
-      socket = new WebSocket('ws://localhost:8000/ws')
+      socket = new WebSocket(
+        `${WS_URL}/ws/${startData.interview_id}?token=${encodeURIComponent(authToken)}`
+      )
       socketRef.current = socket
 
       socket.onopen = () => {
@@ -113,7 +184,7 @@ export function useInterview() {
         mediaRecorder.start(250)
       }
 
-      socket.onclose = () => setStatus('disconnected')
+      socket.onclose = () => setStatus((prev) => (prev === 'ended' ? prev : 'disconnected'))
       socket.onerror = () => setStatus('error')
 
       socket.onmessage = (msg) => {
@@ -128,12 +199,14 @@ export function useInterview() {
           const text: string = msg.data
           if (!text) return
           if (text === 'stop_audio') { stopAudio(); return }
+          if (text.startsWith('ctrl:')) { handleCtrlMessage(text.slice(5)); return }
           if (text.startsWith('ai:')) {
             setAiResponse((prev) => prev + text.slice(3))
           } else {
             // New transcript = new turn: clear previous responses
             setTranscript(text)
             setAiResponse('')
+            setIsFinalQuestion(false)
           }
         }
       }
@@ -174,11 +247,13 @@ export function useInterview() {
     init()
 
     return () => {
+      cancelled = true
       clearInterval(intervalId)
+      stopCountdown()
       socketRef.current?.close()
       audioCtxRef.current?.close()
     }
-  }, [playNextChunk, stopAudio])
+  }, [token, jobRole, playNextChunk, stopAudio, stopCountdown, handleCtrlMessage])
 
-  return { status, transcript, aiResponse, isBotSpeaking }
+  return { status, errorMessage, transcript, aiResponse, isBotSpeaking, timeRemaining, isFinalQuestion }
 }
