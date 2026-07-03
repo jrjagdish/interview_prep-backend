@@ -6,3 +6,11 @@ psycopg2-binary
 passlib[bcrypt]
 PyJWT
 redis>=5.0
+fastapi
+uvicorn
+groq
+deepgram-sdk
+cartesia
+cloudinary
+sentry-sdk
+bcrypt

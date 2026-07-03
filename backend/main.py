@@ -3,6 +3,7 @@ load_dotenv()  # must run before any other imports that read os.getenv
 
 import asyncio
 import json
+import time
 import uuid
 from contextlib import asynccontextmanager
 from fastapi import WebSocket, FastAPI, Depends
@@ -19,6 +20,7 @@ from routes import router, JWT_SECRET, JWT_ALGORITHM
 from db import get_db
 from models import Interview, Profile, utcnow
 import interview_session
+from report import generate_report, upload_report
 import sentry_sdk
 
 
@@ -58,6 +60,18 @@ async def get():
     return {"working good"}
 
 
+FAREWELL_TEXT = (
+    "That's all the time we have for today. Thank you so much for your responses "
+    "— this concludes the interview."
+)
+
+# How recently audio must have arrived for the candidate to be considered
+# "still speaking" when the timer runs out, and the hard cap on how long the
+# watchdog will wait for them to finish before force-ending anyway.
+SPEAKING_GRACE_SECONDS = 2.0
+MAX_GRACE_WAIT_SECONDS = 15.0
+
+
 async def _send_ctrl(websocket: WebSocket, payload: dict) -> None:
     try:
         await websocket.send_text(f"ctrl:{json.dumps(payload)}")
@@ -73,7 +87,53 @@ async def _end_interview(db: Session, interview_id: str) -> None:
         interview.status = "completed"
         interview.concluded_at = utcnow()
         db.commit()
+
+        if messages:
+            try:
+                report_data = await generate_report(messages, interview.job_role)
+                interview.score = report_data.get("total_score")
+                interview.report_url = upload_report(report_data, str(interview.id))
+                db.commit()
+            except Exception as e:
+                sentry_sdk.capture_exception(e)
+                print(f"report generation error: {e}")
+
     await interview_session.end_session(interview_id)
+
+
+async def _end_with_farewell(websocket: WebSocket, db: Session, interview_id: str) -> None:
+    """Says a short goodbye over TTS, then persists to DB and closes the socket.
+    Used for every timer-driven end so the candidate isn't just cut off."""
+    await _send_ctrl(websocket, {"type": "time_up"})
+    try:
+        await websocket.send_text(f"ai:{FAREWELL_TEXT}")
+        await interview_session.append_message(interview_id, "assistant", FAREWELL_TEXT)
+
+        async with Cs_client.tts.websocket_connect() as tts_connection:
+            ctx = tts_connection.context(
+                model_id="sonic-3.5",
+                voice={"mode": "id", "id": "f786b574-daa5-4673-aa0c-cbe3e8534c02"},
+                output_format={
+                    "container": "raw",
+                    "encoding": "pcm_f32le",
+                    "sample_rate": 44100,
+                },
+            )
+            await ctx.push(FAREWELL_TEXT)
+            await ctx.no_more_inputs()
+            async for response in ctx.receive():
+                if response.type == "chunk" and response.audio:
+                    await websocket.send_bytes(response.audio)
+                elif response.type == "done":
+                    break
+    except Exception as e:
+        print(f"farewell tts error: {e}")
+
+    await _end_interview(db, interview_id)
+    try:
+        await websocket.close()
+    except Exception:
+        pass
 
 
 @app.websocket("/ws/{interview_id}")
@@ -117,9 +177,7 @@ async def websocket_endpoint(
 
     remaining = await interview_session.get_remaining_seconds(interview_id)
     if remaining <= 0:
-        await _send_ctrl(websocket, {"type": "time_up"})
-        await _end_interview(db, interview_id)
-        await websocket.close()
+        await _end_with_farewell(websocket, db, interview_id)
         return
 
     history = await interview_session.get_messages(interview_id)
@@ -127,18 +185,28 @@ async def websocket_endpoint(
         await _send_ctrl(websocket, {"type": "history", "messages": history})
 
     ended_event = asyncio.Event()
+    # Updated on every audio chunk received from the browser so the watchdog
+    # can tell whether the candidate is still mid-sentence when time runs out.
+    last_audio_at = {"t": time.monotonic()}
 
     async def watchdog():
         await asyncio.sleep(await interview_session.get_remaining_seconds(interview_id))
         if ended_event.is_set():
             return
+
+        # Give a candidate who's still speaking a short grace window to finish
+        # their sentence instead of yanking the mic mid-word.
+        grace_deadline = time.monotonic() + MAX_GRACE_WAIT_SECONDS
+        while (
+            time.monotonic() - last_audio_at["t"] < SPEAKING_GRACE_SECONDS
+            and time.monotonic() < grace_deadline
+        ):
+            await asyncio.sleep(0.5)
+            if ended_event.is_set():
+                return
+
         ended_event.set()
-        await _send_ctrl(websocket, {"type": "time_up"})
-        await _end_interview(db, interview_id)
-        try:
-            await websocket.close()
-        except Exception:
-            pass
+        await _end_with_farewell(websocket, db, interview_id)
 
     watchdog_task = asyncio.create_task(watchdog())
 
@@ -177,12 +245,7 @@ async def websocket_endpoint(
                             )
                             if remaining <= 0:
                                 ended_event.set()
-                                await _send_ctrl(websocket, {"type": "time_up"})
-                                await _end_interview(db, interview_id)
-                                try:
-                                    await websocket.close()
-                                except Exception:
-                                    pass
+                                await _end_with_farewell(websocket, db, interview_id)
                                 break
 
                             is_final_turn = (
@@ -334,6 +397,7 @@ async def websocket_endpoint(
 
                     if "bytes" in message and message["bytes"]:
                         # Normal audio chunk from the browser mic — forward to Deepgram.
+                        last_audio_at["t"] = time.monotonic()
                         await deepgram_socket.send_media(message["bytes"])
 
                     elif "text" in message and message["text"] == "interrupt":

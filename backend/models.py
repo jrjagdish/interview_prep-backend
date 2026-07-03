@@ -61,6 +61,7 @@ class Interview(Base):
     status: Mapped[str] = mapped_column(String(50), default="active", nullable=False)
     job_role: Mapped[str | None] = mapped_column(String(255), nullable=True)
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    report_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     concluded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

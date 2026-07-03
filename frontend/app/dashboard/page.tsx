@@ -1,11 +1,13 @@
 'use client'
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
+import { useInterviews } from '@/hooks/useInterviews'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { ThemeToggle } from '@/components/ThemeToggle'
 
 function DashboardContent() {
   const { user, logout } = useAuth()
+  const { interviews, completed, bestScore, isLoading } = useInterviews()
 
   const displayName = user?.username ?? user?.email?.split('@')[0] ?? 'there'
 
@@ -71,8 +73,8 @@ function DashboardContent() {
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {[
-            { label: 'Interviews Done', value: '0', icon: '🎙️' },
-            { label: 'Best Score', value: '—', icon: '⭐' },
+            { label: 'Interviews Done', value: isLoading ? '—' : String(completed.length), icon: '🎙️' },
+            { label: 'Best Score', value: isLoading || bestScore === null ? '—' : String(Math.round(bestScore)), icon: '⭐' },
             { label: 'Plan', value: 'Free', icon: '🚀' },
           ].map(({ label, value, icon }) => (
             <div key={label} className="rounded-xl border shadow-sm px-6 py-5 flex items-center gap-4 border-slate-200 bg-white dark:border-white/8 dark:bg-white/3 dark:shadow-none">
@@ -113,10 +115,45 @@ function DashboardContent() {
 
         <div>
           <h3 className="text-sm font-semibold uppercase tracking-widest mb-4 text-slate-400 dark:text-white/60">Recent Interviews</h3>
-          <div className="rounded-xl border shadow-sm px-6 py-10 flex flex-col items-center justify-center text-center border-slate-200 bg-white dark:border-white/8 dark:bg-white/3 dark:shadow-none">
-            <p className="text-sm text-slate-400 dark:text-white/20">No interviews yet</p>
-            <p className="text-xs mt-1 text-slate-400 dark:text-white/10">Your past sessions will appear here</p>
-          </div>
+          {interviews.length === 0 ? (
+            <div className="rounded-xl border shadow-sm px-6 py-10 flex flex-col items-center justify-center text-center border-slate-200 bg-white dark:border-white/8 dark:bg-white/3 dark:shadow-none">
+              <p className="text-sm text-slate-400 dark:text-white/20">
+                {isLoading ? 'Loading…' : 'No interviews yet'}
+              </p>
+              <p className="text-xs mt-1 text-slate-400 dark:text-white/10">Your past sessions will appear here</p>
+            </div>
+          ) : (
+            <div className="rounded-xl border shadow-sm divide-y divide-slate-100 border-slate-200 bg-white dark:border-white/8 dark:divide-white/5 dark:bg-white/3 dark:shadow-none">
+              {interviews.slice(0, 5).map((interview) => (
+                <div key={interview.id} className="flex items-center justify-between gap-4 px-6 py-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-900 dark:text-white truncate">
+                      {interview.job_role ?? 'Interview'}
+                    </p>
+                    <p className="text-xs mt-0.5 text-slate-400 dark:text-white/40">
+                      {new Date(interview.created_at).toLocaleDateString()} ·{' '}
+                      {interview.status === 'completed' ? 'Completed' : 'In progress'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="text-sm font-semibold text-slate-900 dark:text-white">
+                      {interview.score !== null ? Math.round(interview.score) : '—'}
+                    </span>
+                    {interview.report_url && (
+                      <a
+                        href={interview.report_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs font-medium text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 dark:hover:text-indigo-300"
+                      >
+                        View Report
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
       </main>

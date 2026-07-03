@@ -1,11 +1,13 @@
 "use client";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
+import { useInterviews } from "@/hooks/useInterviews";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 function ProfileContent() {
   const { user, logout } = useAuth();
+  const { completed, bestScore, isLoading: interviewsLoading } = useInterviews();
 
   const displayName = user?.username ?? user?.email?.split("@")[0] ?? "User";
   const email = user?.email ?? "—";
@@ -82,8 +84,8 @@ function ProfileContent() {
           </h2>
           <div className="grid grid-cols-3 gap-4">
             {[
-              { label: "Interviews Done", value: "0", icon: "🎙️" },
-              { label: "Best Score", value: "—", icon: "⭐" },
+              { label: "Interviews Done", value: interviewsLoading ? "—" : String(completed.length), icon: "🎙️" },
+              { label: "Best Score", value: interviewsLoading || bestScore === null ? "—" : String(Math.round(bestScore)), icon: "⭐" },
               { label: "Practice Hours", value: "0h", icon: "⏱️" },
             ].map(({ label, value, icon }) => (
               <div
