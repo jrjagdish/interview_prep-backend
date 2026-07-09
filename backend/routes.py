@@ -1,3 +1,4 @@
+import asyncio
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -11,8 +12,9 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 import cloudinary.uploader
 from db import get_db
-from models import Profile, User
+from models import Interview, Profile, User
 import config
+import interview_session
 
 router = APIRouter()
 security = HTTPBearer()
@@ -45,6 +47,10 @@ class AuthResponse(BaseModel):
     user_id: str
     email: str
     username: str | None
+
+
+class StartInterviewRequest(BaseModel):
+    job_role: str | None = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -192,3 +198,98 @@ def upload_file(
     db.refresh(profile)
 
     return {"Message": "Successful"}
+
+
+@router.get("/api/interviews")
+def list_interviews(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    profile = current_user.profile
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    interviews = (
+        db.query(Interview)
+        .filter(Interview.profile_id == profile.id)
+        .order_by(Interview.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": str(i.id),
+            "job_role": i.job_role,
+            "status": i.status,
+            "score": i.score,
+            "report_url": i.report_url,
+            "created_at": i.created_at,
+            "concluded_at": i.concluded_at,
+        }
+        for i in interviews
+    ]
+
+
+@router.get("/api/interviews/{interview_id}")
+def get_interview(
+    interview_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        uuid.UUID(interview_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid interview id")
+
+    interview = (
+        db.query(Interview)
+        .join(Profile, Interview.profile_id == Profile.id)
+        .filter(Interview.id == interview_id, Profile.user_id == current_user.id)
+        .first()
+    )
+    if interview is None:
+        raise HTTPException(status_code=404, detail="Interview not found")
+
+    return {
+        "id": str(interview.id),
+        "job_role": interview.job_role,
+        "status": interview.status,
+        "score": interview.score,
+        "report_url": interview.report_url,
+        "conversation_data": interview.conversation_data,
+        "created_at": interview.created_at,
+        "concluded_at": interview.concluded_at,
+    }
+
+
+@router.post("/api/interviews/start")
+async def start_interview(
+    body: StartInterviewRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    profile = current_user.profile
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    if not profile.is_pro and profile.available_interviews <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="No interview credits remaining",
+        )
+
+    interview =Interview(profile_id=profile.id, job_role=body.job_role, status="active")
+    db.add(interview)
+
+    if not profile.is_pro:
+        profile.available_interviews -= 1
+    profile.interview_attempts += 1
+
+    await asyncio.to_thread(db.commit)
+    await asyncio.to_thread(db.refresh, interview)
+
+    await interview_session.create_session(str(interview.id), body.job_role)
+
+    return {
+        "interview_id": str(interview.id),
+        "duration_seconds": interview_session.INTERVIEW_DURATION_SECONDS,
+    }

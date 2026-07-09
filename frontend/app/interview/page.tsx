@@ -9,11 +9,18 @@ const STATUS_LABEL: Record<string, { label: string; color: string }> = {
   connected:    { label: 'Live',         color: 'bg-emerald-400 animate-pulse' },
   disconnected: { label: 'Disconnected', color: 'bg-red-500' },
   error:        { label: 'Error',        color: 'bg-red-500' },
+  ended:        { label: 'Interview complete', color: 'bg-indigo-400' },
+}
+
+function formatTime(seconds: number) {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return `${m}:${s.toString().padStart(2, '0')}`
 }
 
 function InterviewContent() {
   const { user, logout } = useAuth()
-  const { status, transcript, aiResponse, isBotSpeaking } = useInterview()
+  const { status, errorMessage, transcript, aiResponse, isBotSpeaking, timeRemaining, isFinalQuestion } = useInterview()
   const { label, color } = STATUS_LABEL[status] ?? STATUS_LABEL.idle
 
   const displayName = user?.username ?? user?.email?.split('@')[0] ?? 'You'
@@ -38,6 +45,11 @@ function InterviewContent() {
         </div>
 
         <div className="flex items-center gap-3">
+          {timeRemaining !== null && status !== 'ended' && (
+            <div className={`px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-xs font-mono ${timeRemaining <= 60 ? 'text-red-400' : 'text-white/60'}`}>
+              {formatTime(timeRemaining)}
+            </div>
+          )}
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10">
             <span className={`w-2 h-2 rounded-full ${color}`} />
             <span className="text-white/60 text-xs font-medium">{label}</span>
@@ -59,6 +71,19 @@ function InterviewContent() {
       </section>
 
       <section className="relative z-10 px-8 pb-6 flex flex-col gap-3 max-w-2xl mx-auto w-full">
+        {isFinalQuestion && status !== 'ended' && (
+          <div className="text-center text-amber-400 text-xs font-semibold uppercase tracking-widest py-1">
+            This is the last question of the interview
+          </div>
+        )}
+        {status === 'ended' && (
+          <div className="text-center text-indigo-300 text-sm py-2">
+            Time's up — thanks for the interview. Your responses have been saved.
+          </div>
+        )}
+        {status === 'error' && errorMessage && (
+          <div className="text-center text-red-400 text-sm py-2">{errorMessage}</div>
+        )}
         {transcript && (
           <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-white/5 border border-white/8 backdrop-blur-sm">
             <span className="text-white/40 text-xs font-semibold uppercase tracking-widest mt-0.5 shrink-0">{displayName}</span>
