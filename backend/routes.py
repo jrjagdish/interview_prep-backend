@@ -1,3 +1,4 @@
+import asyncio
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -276,15 +277,15 @@ async def start_interview(
             detail="No interview credits remaining",
         )
 
-    interview = Interview(profile_id=profile.id, job_role=body.job_role, status="active")
+    interview =Interview(profile_id=profile.id, job_role=body.job_role, status="active")
     db.add(interview)
 
     if not profile.is_pro:
         profile.available_interviews -= 1
     profile.interview_attempts += 1
 
-    db.commit()
-    db.refresh(interview)
+    await asyncio.to_thread(db.commit)
+    await asyncio.to_thread(db.refresh, interview)
 
     await interview_session.create_session(str(interview.id), body.job_role)
 

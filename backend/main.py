@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+
 load_dotenv()  # must run before any other imports that read os.getenv
 
 import asyncio
@@ -23,7 +24,6 @@ import interview_session
 from report import generate_report, upload_report
 import sentry_sdk
 
-
 sentry_sdk.init(
     dsn=os.getenv("SENTRY_URL"),
     send_default_pii=True,
@@ -38,8 +38,6 @@ dg_client = AsyncDeepgramClient(api_key=deepgram_api_key)
 Cs_client = AsyncCartesia(api_key=os.getenv("CARTESIA_API_KEY"))
 
 
-
-
 app = FastAPI()
 
 app.add_middleware(
@@ -51,9 +49,8 @@ app.add_middleware(
 )
 
 
-
-
 app.include_router(router=router)
+
 
 @app.get("/")
 async def get():
@@ -81,19 +78,21 @@ async def _send_ctrl(websocket: WebSocket, payload: dict) -> None:
 
 async def _end_interview(db: Session, interview_id: str) -> None:
     messages = await interview_session.get_messages(interview_id)
-    interview = db.query(Interview).filter(Interview.id == interview_id).first()
+    interview = await asyncio.to_thread(
+        lambda: db.query(Interview).filter(Interview.id == interview_id).first()
+    )
     if interview is not None and interview.status == "active":
         interview.conversation_data = messages
         interview.status = "completed"
         interview.concluded_at = utcnow()
-        db.commit()
+        await asyncio.to_thread(db.commit)
 
         if messages:
             try:
                 report_data = await generate_report(messages, interview.job_role)
                 interview.score = report_data.get("total_score")
                 interview.report_url = upload_report(report_data, str(interview.id))
-                db.commit()
+                await asyncio.to_thread(db.commit)
             except Exception as e:
                 sentry_sdk.capture_exception(e)
                 print(f"report generation error: {e}")
@@ -101,7 +100,9 @@ async def _end_interview(db: Session, interview_id: str) -> None:
     await interview_session.end_session(interview_id)
 
 
-async def _end_with_farewell(websocket: WebSocket, db: Session, interview_id: str) -> None:
+async def _end_with_farewell(
+    websocket: WebSocket, db: Session, interview_id: str
+) -> None:
     """Says a short goodbye over TTS, then persists to DB and closes the socket.
     Used for every timer-driven end so the candidate isn't just cut off."""
     await _send_ctrl(websocket, {"type": "time_up"})
@@ -160,11 +161,13 @@ async def websocket_endpoint(
         await websocket.close(code=4400)
         return
 
-    interview = (
-        db.query(Interview)
-        .join(Profile, Interview.profile_id == Profile.id)
-        .filter(Interview.id == interview_id, Profile.user_id == user_id)
-        .first()
+    interview =await asyncio.to_thread(
+        (
+           lambda: db.query(Interview)
+            .join(Profile, Interview.profile_id == Profile.id)
+            .filter(Interview.id == interview_id, Profile.user_id == user_id)
+            .first()
+        )
     )
     if interview is None or not await interview_session.session_exists(interview_id):
         await websocket.close(code=4404)
@@ -286,9 +289,7 @@ async def websocket_endpoint(
                             )
 
                             if just_warned:
-                                await _send_ctrl(
-                                    websocket, {"type": "final_question"}
-                                )
+                                await _send_ctrl(websocket, {"type": "final_question"})
 
                             # Step 2: Stream Groq AI reply word by word.
                             stream = await client.chat.completions.create(
