@@ -271,6 +271,9 @@ async def start_interview(
     if profile is None:
         raise HTTPException(status_code=404, detail="Profile not found")
 
+    print("is_pro =", profile.is_pro)
+    print("available_interviews =", profile.available_interviews)
+
     if not profile.is_pro and profile.available_interviews <= 0:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
