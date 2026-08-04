@@ -90,6 +90,13 @@ export function useInterview(jobRole?: string) {
     }
   }, [])
 
+  const endSession = useCallback(() => {
+    const socket = socketRef.current
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send('end_session')
+    }
+  }, [])
+
   const handleCtrlMessage = useCallback((raw: string) => {
     let payload: { type: string; messages?: { role: string; content: string }[] }
     try {
@@ -255,5 +262,5 @@ export function useInterview(jobRole?: string) {
     }
   }, [token, jobRole, playNextChunk, stopAudio, stopCountdown, handleCtrlMessage])
 
-  return { status, errorMessage, transcript, aiResponse, isBotSpeaking, timeRemaining, isFinalQuestion }
+  return { status, errorMessage, transcript, aiResponse, isBotSpeaking, timeRemaining, isFinalQuestion, endSession }
 }

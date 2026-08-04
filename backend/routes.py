@@ -172,8 +172,29 @@ def me(current_user: User = Depends(get_current_user)):
         "image_url": current_user.image_url,
         "is_verified": current_user.is_verified,
         "created_at": current_user.created_at,
-        "pdf_url" : profile.resume_pdf_url if profile else None
+        "pdf_url" : profile.resume_pdf_url if profile else None,
+        "is_pro": profile.is_pro if profile else False,
+        "available_interviews": profile.available_interviews if profile else 0,
     }
+
+
+FREE_CREDIT_BONUS = 3
+
+
+@router.post("/api/profile/claim-credit")
+def claim_free_credit(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    profile = current_user.profile
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    profile.available_interviews += FREE_CREDIT_BONUS
+    db.commit()
+    db.refresh(profile)
+
+    return {"available_interviews": profile.available_interviews}
 
 
 @router.post("/api/upload")

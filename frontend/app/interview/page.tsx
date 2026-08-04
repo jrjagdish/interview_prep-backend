@@ -20,8 +20,14 @@ function formatTime(seconds: number) {
 
 function InterviewContent() {
   const { user, logout } = useAuth()
-  const { status, errorMessage, transcript, aiResponse, isBotSpeaking, timeRemaining, isFinalQuestion } = useInterview()
+  const { status, errorMessage, transcript, aiResponse, isBotSpeaking, timeRemaining, isFinalQuestion, endSession } = useInterview()
   const { label, color } = STATUS_LABEL[status] ?? STATUS_LABEL.idle
+
+  function handleEndSession() {
+    if (confirm('End the interview now? Your responses so far will be saved.')) {
+      endSession()
+    }
+  }
 
   const displayName = user?.username ?? user?.email?.split('@')[0] ?? 'You'
 
@@ -54,6 +60,14 @@ function InterviewContent() {
             <span className={`w-2 h-2 rounded-full ${color}`} />
             <span className="text-white/60 text-xs font-medium">{label}</span>
           </div>
+          {status === 'connected' && (
+            <button
+              onClick={handleEndSession}
+              className="px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-xs font-semibold transition-colors"
+            >
+              End Session
+            </button>
+          )}
           <button
             onClick={logout}
             className="text-white/40 hover:text-white text-xs transition-colors"
@@ -78,7 +92,7 @@ function InterviewContent() {
         )}
         {status === 'ended' && (
           <div className="text-center text-indigo-300 text-sm py-2">
-            Time's up — thanks for the interview. Your responses have been saved.
+            Interview complete — thanks for your responses. Everything has been saved.
           </div>
         )}
         {status === 'error' && errorMessage && (

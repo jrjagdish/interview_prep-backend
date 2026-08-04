@@ -10,6 +10,8 @@ export interface AuthUser {
   image_url: string | null
   is_verified: boolean
   pdf_url : string | null
+  is_pro: boolean
+  available_interviews: number
 }
 
 interface AuthContextValue {
@@ -19,6 +21,10 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>
   register: (username: string, email: string, password: string) => Promise<void>
   logout: () => void
+  refreshUser: () => Promise<void>
+  setUser: (user: AuthUser | null) => void
+  justLoggedIn: boolean
+  consumeJustLoggedIn: () => void
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -27,6 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [token, setToken] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [justLoggedIn, setJustLoggedIn] = useState(false)
 
   useEffect(() => {
     const stored = localStorage.getItem('auth_token')
@@ -67,7 +74,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await res.json()
     localStorage.setItem('auth_token', data.access_token)
     setToken(data.access_token)
-    setUser({ id: data.user_id, email: data.email, username: data.username, image_url: null, is_verified: false, pdf_url: null })
+    await fetchMe(data.access_token)
+    setJustLoggedIn(true)
   }
 
   async function register(username: string, email: string, password: string) {
@@ -83,17 +91,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await res.json()
     localStorage.setItem('auth_token', data.access_token)
     setToken(data.access_token)
-    setUser({ id: data.user_id, email: data.email, username: data.username, image_url: null, is_verified: false, pdf_url: null })
+    await fetchMe(data.access_token)
+    setJustLoggedIn(true)
   }
 
   function logout() {
     localStorage.removeItem('auth_token')
     setToken(null)
     setUser(null)
+    setJustLoggedIn(false)
+  }
+
+  async function refreshUser() {
+    if (token) await fetchMe(token)
+  }
+
+  function consumeJustLoggedIn() {
+    setJustLoggedIn(false)
   }
 
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, token, isLoading, login, register, logout, refreshUser, setUser, justLoggedIn, consumeJustLoggedIn }}>
       {children}
     </AuthContext.Provider>
   )

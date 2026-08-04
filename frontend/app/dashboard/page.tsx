@@ -1,13 +1,23 @@
 'use client'
 import Link from 'next/link'
+import { useEffect, useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { useInterviews } from '@/hooks/useInterviews'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { ThemeToggle } from '@/components/ThemeToggle'
+import { ClaimCreditsModal } from '@/components/ClaimCreditsModal'
 
 function DashboardContent() {
-  const { user, logout } = useAuth()
+  const { user, logout, justLoggedIn, consumeJustLoggedIn } = useAuth()
   const { interviews, completed, bestScore, isLoading } = useInterviews()
+  const [showClaimModal, setShowClaimModal] = useState(false)
+
+  useEffect(() => {
+    if (justLoggedIn) {
+      setShowClaimModal(true)
+      consumeJustLoggedIn()
+    }
+  }, [justLoggedIn, consumeJustLoggedIn])
 
   const displayName = user?.username ?? user?.email?.split('@')[0] ?? 'there'
 
@@ -75,7 +85,7 @@ function DashboardContent() {
           {[
             { label: 'Interviews Done', value: isLoading ? '—' : String(completed.length), icon: '🎙️' },
             { label: 'Best Score', value: isLoading || bestScore === null ? '—' : String(Math.round(bestScore)), icon: '⭐' },
-            { label: 'Plan', value: 'Free', icon: '🚀' },
+            { label: 'Credits Left', value: user?.is_pro ? 'Unlimited' : String(user?.available_interviews ?? 0), icon: '🚀' },
           ].map(({ label, value, icon }) => (
             <div key={label} className="rounded-xl border shadow-sm px-6 py-5 flex items-center gap-4 border-slate-200 bg-white dark:border-white/8 dark:bg-white/3 dark:shadow-none">
               <span className="text-2xl">{icon}</span>
@@ -157,6 +167,8 @@ function DashboardContent() {
         </div>
 
       </main>
+
+      {showClaimModal && <ClaimCreditsModal onClose={() => setShowClaimModal(false)} />}
     </div>
   )
 }

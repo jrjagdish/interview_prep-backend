@@ -405,6 +405,12 @@ async def websocket_endpoint(
                         # Browser detected speech during TTS playback — signal the TTS task.
                         interrupt_event.set()
 
+                    elif "text" in message and message["text"] == "end_session":
+                        # Candidate clicked "End Session" — end and persist just like a timeout.
+                        ended_event.set()
+                        await _end_with_farewell(websocket, db, interview_id)
+                        break
+
             finally:
                 listener_task.cancel()
 
